@@ -1,0 +1,15 @@
+import cineScoreThumbnail from './cine-score-thumbnail.png';
+
+## Introduction
+
+Yes, you might have already guessed it from the title. Since React 19 is finally stable after the [Suspense Drama](https://tkdodo.eu/blog/react-19-and-suspense-a-drama-in-3-acts), complete with a neat solution called [Prewarming](https://github.com/facebook/react/issues/29898#issuecomment-2477449973), we can finally dive deep into [**React Server Components**](https://react.dev/reference/rsc/server-components). No more noise about them being experimental, canary, or any of that.
+
+We'll explore React's full-stack architecture by building a simple full-stack app called **Cine Score**. In this app, users can browse a list of movies, upvote or downvote a movie, and search through the collection. Here's a sneak peek at what we'll create:
+
+<Image src={cineScoreThumbnail} alt='Cine Score thumbnail' />
+
+Not excited yet? 🤔 What if I told you we'd build this app _without_ using any frameworks? Sounds exciting, right? 🎉 Get ready, because we're going to rely solely on the tools provided by React and a few helper libraries.
+
+By the end of this post, I aim to give you a _solid_ understanding of how RSC frameworks work under the hood. This way, you'll be able to use these frameworks wisely instead of fighting them.
+
+> **Disclaimer:** All the code and implementation details discussed in this post are for educational purposes only and are not intended for production use.
