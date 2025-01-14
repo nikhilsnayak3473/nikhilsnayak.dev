@@ -4,7 +4,7 @@ import cineScoreThumbnail from './cine-score-thumbnail.png';
 
 Yes, you might have already guessed it from the title. Since React 19 is finally stable after the [Suspense Drama](https://tkdodo.eu/blog/react-19-and-suspense-a-drama-in-3-acts), complete with a neat solution called [Prewarming](https://github.com/facebook/react/issues/29898#issuecomment-2477449973), we can finally dive deep into [**React Server Components**](https://react.dev/reference/rsc/server-components). No more noise about them being experimental, canary, or any of that.
 
-We'll explore React's full-stack architecture by building a simple full-stack app called **Cine Score**. In this app, users can browse a list of movies, upvote or downvote a movie, and search through the collection. Here's a sneak peek at what we'll create:
+We'll explore React's full-stack architecture by building a simple full-stack app called **Cine Score**. In this app, users can browse a list of movies, up-vote or down-vote a movie, and search through the collection. Here's a sneak peek at what we'll create:
 
 <Image src={cineScoreThumbnail} alt='Cine Score thumbnail' />
 
@@ -13,3 +13,35 @@ Not excited yet? 🤔 What if I told you we'd build this app _without_ using any
 By the end of this post, I aim to give you a _solid_ understanding of how RSC frameworks work under the hood. This way, you'll be able to use these frameworks wisely instead of fighting them.
 
 > **Disclaimer:** All the code and implementation details discussed in this post are for educational purposes only and are not intended for production use.
+
+## Project Setup
+
+We’ll start with a clean slate and build everything step by step. For simplicity, we won’t be using TypeScript. If you’d like to follow along, make sure you have the latest **LTS** version of Node.js installed.
+
+Let’s create a new Node.js project:
+
+```bash
+mkdir cine-score && cd cine-score && npm init -y
+```
+
+Install the following dependencies:
+
+```bash
+npm install express react react-dom webpack @babel/core @babel/register @babel/preset-react @babel/transform-modules-commonjs babel-loader
+```
+
+<CollapsibleContent summary="Overview of each dependency's role:">
+
+- **webpack**: A bundler used to compile JavaScript for the browser.
+
+- **@babel/core**: The core Babel library used to transform JSX into browser-compatible JavaScript.
+
+- **@babel/register**: A runtime helper for Babel that enables on-the-fly transpilation of ES6+ and JSX in Node.js without pre-compilation.
+
+- **@babel/preset-react**: A Babel preset for transpiling JSX and React-specific syntax into JavaScript.
+
+- **@babel/transform-modules-commonjs**: A Babel plugin that transforms ES module syntax (`import`/`export`) into CommonJS (`require`/`module.exports`) for Node.js compatibility.
+
+- **babel-loader**: A Webpack loader that integrates Babel to transpile JavaScript files during the build process.
+
+</CollapsibleContent>
