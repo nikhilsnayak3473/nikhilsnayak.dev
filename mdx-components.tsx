@@ -13,6 +13,7 @@ import { Link } from 'next-view-transitions';
 import { Tweet as ReactTweet, type TweetProps } from 'react-tweet';
 
 import { cn, slugify } from '~/lib/utils';
+import { ScrollArea, ScrollBar } from '~/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '~/components/ui/tabs';
 import { Spinner } from '~/components/spinner';
 
@@ -250,6 +251,12 @@ const components = {
   Row,
   Column,
   Tweet,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  ScrollArea,
+  ScrollBar,
 };
 
 export function useMDXComponents(): MDXComponents {

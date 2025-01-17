@@ -45,3 +45,359 @@ npm install express react react-dom webpack @babel/core @babel/register @babel/p
 - **babel-loader**: A Webpack loader that integrates Babel to transpile JavaScript files during the build process.
 
 </CollapsibleContent>
+
+## Fizz - Traditional React SSR
+
+Let's bootstrap the app in the traditional SSR way, as we've been doing since the early days of Next.js.
+
+Here’s the folder structure and the files in the SSR version:
+
+```
+cine-score/
+├── package.json
+├── build.js       # Build script
+├── client.js      # Client-side logic
+├── app.js         # Main application entry point
+├── search.js      # Component: search functionality
+├── movie-list.js  # Component: movie listing
+├── vote.js        # Component: voting functionality
+└── server.js      # Server-side logic
+```
+
+<Tabs defaultValue='package.json'>
+
+<ScrollArea className='w-full'>
+  <TabsList>
+    <TabsTrigger value='package.json'>package.json</TabsTrigger>
+    <TabsTrigger value='build.js'>build.js</TabsTrigger>
+    <TabsTrigger value='client.js'>client.js</TabsTrigger>
+    <TabsTrigger value='app.js'>app.js</TabsTrigger>
+    <TabsTrigger value='search.js'>search.js</TabsTrigger>
+    <TabsTrigger value='movie-list.js'>movie-list.js</TabsTrigger>
+    <TabsTrigger value='vote.js'>vote.js</TabsTrigger>
+    <TabsTrigger value='server.js'>server.js</TabsTrigger>
+  </TabsList>
+  <ScrollBar orientation='horizontal' />
+</ScrollArea>
+
+<TabsContent value='package.json'>
+
+```json
+{
+  "name": "cine-score",
+  "scripts": {
+    "build": "node build.js",
+    "dev": "node server.js",
+    "start": "npm run build && npm run dev"
+  },
+  "dependencies": {
+    "@babel/core": "^7.26.0",
+    "@babel/plugin-transform-modules-commonjs": "^7.26.3",
+    "@babel/preset-react": "^7.26.3",
+    "@babel/register": "^7.25.9",
+    "babel-loader": "^9.2.1",
+    "express": "^4.21.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "webpack": "^5.97.1"
+  }
+}
+```
+
+</TabsContent>
+
+<TabsContent value='build.js'>
+
+```js
+const path = require('path');
+const webpack = require('webpack');
+
+const builder = webpack({
+  mode: 'development',
+  entry: path.resolve(__dirname, './client.js'),
+  output: {
+    path: path.resolve(__dirname, './dist'),
+    filename: 'client.js',
+  },
+  module: {
+    rules: [
+      {
+        test: /\.js$/,
+        exclude: /node_modules/,
+        use: {
+          loader: 'babel-loader',
+          options: {
+            presets: [
+              [
+                '@babel/preset-react',
+                {
+                  runtime: 'automatic',
+                },
+              ],
+            ],
+          },
+        },
+      },
+    ],
+  },
+});
+
+builder.run((err) => {
+  if (err) console.error('Webpack Build Failed', err);
+});
+```
+
+</TabsContent>
+
+<TabsContent value='client.js'>
+
+```js
+import ReactDOMClient from 'react-dom/client';
+
+import { App } from './app';
+
+function hydrateDocument() {
+  ReactDOMClient.hydrateRoot(document, <App />);
+}
+
+hydrateDocument();
+```
+
+</TabsContent>
+
+<TabsContent value='app.js'>
+
+```js
+import { useState } from 'react';
+
+import { MoviesList } from './movie-list';
+import { Search } from './search';
+
+const initialMovies = [
+  { votes: 0, id: 1, title: 'The Dark Knight' },
+  { votes: 0, id: 2, title: 'Interstellar' },
+  // ...............
+];
+
+export function App() {
+  const [movies, setMovies] = useState(initialMovies);
+  const [query, setQuery] = useState('');
+
+  const voteFn = async (voted, formData) => {
+    if (voted) return true;
+
+    const id = Number(formData.get('id'));
+    const type = formData.get('type');
+
+    setMovies((prev) =>
+      prev.map((movie) =>
+        movie.id === id
+          ? {
+              ...movie,
+              votes: type === 'upVote' ? movie.votes + 1 : movie.votes - 1,
+            }
+          : movie
+      )
+    );
+    return true;
+  };
+
+  let filteredMovies = movies;
+
+  if (query) {
+    filteredMovies = movies.filter((movie) =>
+      movie.title.toLowerCase().includes(query.toLowerCase())
+    );
+  }
+
+  return (
+    <html lang='en'>
+      <head>
+        <meta charSet='UTF-8' />
+        <meta name='viewport' content='width=device-width, initial-scale=1.0' />
+        <title>Cine Score</title>
+        <script src='https://cdn.tailwindcss.com'></script>
+      </head>
+      <body>
+        <div className='font-geist flex min-h-[100dvh] flex-col bg-gray-900 text-gray-200'>
+          <main className='container mx-auto max-w-lg flex-grow px-4 py-8'>
+            <Search onSearch={setQuery} />
+            <MoviesList voteFn={voteFn} movies={filteredMovies} />
+          </main>
+        </div>
+      </body>
+    </html>
+  );
+}
+```
+
+</TabsContent>
+
+<TabsContent value='search.js'>
+
+```js
+import { useTransition } from 'react';
+
+export function Search({ onSearch }) {
+  const [isSearching, startSearching] = useTransition();
+
+  const handleChange = (e) => {
+    const query = e.target.value;
+    startSearching(() => {
+      onSearch(query);
+    });
+  };
+
+  return (
+    <search className='relative mb-6 px-4'>
+      <form>
+        <input
+          type='text'
+          placeholder='Search movies...'
+          className='w-full rounded-md border border-gray-700 bg-gray-800 px-8 py-2 text-gray-300 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500'
+          onChange={handleChange}
+        />
+      </form>
+      {isSearching && (
+        <div className='absolute right-6 top-1/2 -translate-y-1/2'>
+          <div className='size-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-500' />
+        </div>
+      )}
+    </search>
+  );
+}
+```
+
+</TabsContent>
+
+<TabsContent value='movie-list.js'>
+
+```js
+import { Vote } from './vote';
+
+export function MoviesList({ movies, voteFn }) {
+  return (
+    <ul
+      className='max-h-[70vh] space-y-4 overflow-auto px-4'
+      style={{
+        scrollbarWidth: 'thin',
+        scrollbarColor: '#4b5563 #1a1a1a',
+      }}
+    >
+      {movies.length > 0 ? (
+        movies.map((movie) => (
+          <li
+            key={movie.id}
+            className='flex items-center justify-between rounded-lg bg-gray-800 p-4 shadow'
+          >
+            <div className='flex items-center space-x-4'>
+              <Vote id={movie.id} action={voteFn} />
+              <span className='text-xl font-bold'>{movie.votes}</span>
+              <span className='text-gray-300'>{movie.title}</span>
+            </div>
+          </li>
+        ))
+      ) : (
+        <li className='p-4 text-center text-gray-500'>No movies</li>
+      )}
+    </ul>
+  );
+}
+```
+
+</TabsContent>
+
+<TabsContent value='vote.js'>
+
+```js
+import { useActionState } from 'react';
+
+export function Vote({ id, action }) {
+  const [isVoted, formAction] = useActionState(action, false);
+
+  return (
+    <div className='flex items-center gap-4'>
+      <form action={formAction}>
+        <input name='id' value={id} hidden readOnly />
+        <input name='type' value='upVote' hidden readOnly />
+        <button
+          disabled={isVoted}
+          className='text-xl text-green-400 focus:outline-none disabled:opacity-50'
+          aria-label='Upvote'
+          type='submit'
+        >
+          ↑
+        </button>
+      </form>
+      <form action={formAction}>
+        <input name='id' value={id} hidden readOnly />
+        <input name='type' value='downVote' hidden readOnly />
+        <button
+          disabled={isVoted}
+          className='text-xl text-red-400 focus:outline-none disabled:opacity-50'
+          aria-label='Downvote'
+          type='submit'
+        >
+          ↓
+        </button>
+      </form>
+    </div>
+  );
+}
+```
+
+</TabsContent>
+
+<TabsContent value='server.js'>
+
+```js
+require('@babel/register')({
+  ignore: [/[\\\/](dist|node_modules)[\\\/]/],
+  presets: [['@babel/preset-react', { runtime: 'automatic' }]],
+  plugins: ['@babel/plugin-transform-modules-commonjs'],
+});
+
+const express = require('express');
+const path = require('path');
+const React = require('react');
+const ReactDOMServer = require('react-dom/server');
+const { App } = require('./app');
+
+const app = express();
+const PORT = 1234;
+
+app.use(express.static(path.join(__dirname, 'dist')));
+
+app.get('/', (req, res) => {
+  try {
+    const tree = React.createElement(App);
+    const htmlStream = ReactDOMServer.renderToPipeableStream(tree, {
+      bootstrapScripts: ['/client.js'],
+      onShellReady: () => {
+        htmlStream.pipe(res);
+      },
+    });
+  } catch (error) {
+    console.log({ error });
+    res.status(500).send('Internal Server Error');
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`Server is running on http://localhost:${PORT}`);
+});
+```
+
+</TabsContent>
+
+</Tabs>
+
+Let’s break this down:
+
+- **package.json**: Includes two important scripts, `build` and `dev`.
+- **build.js**: A standard Webpack setup, including `babel-loader`, to transpile and bundle dependencies for the browser. The entry point for compilation is client.js, with output in the `dist` folder.
+- **client.js**: Hydrates the server-generated HTML using `hydrateRoot` from `react-dom/client`. The application entry point is app.js.
+- **app.js**: Contains the `App` component, which builds the entire document. It uses client-side state for managing movies like searching and voting. The `Vote` component utilizes React 19's `useActionState` for handling form actions efficiently. For a deeper dive into this pattern, check out my previous blog: [The True Nature of useActionState](https://www.nikhilsnayak.dev/blogs/the-true-nature-of-use-action-state).
+- **server.js**: A minimal HTTP server built with Express. It leverages `@babel/register` to enable on-the-fly JSX transpilation and CommonJS compatibility without a pre-compilation step. Static assets are served from the `dist` folder, and the `renderToPipeableStream` method from `react-dom/server` is used to stream the server-rendered `App` component to the client efficiently.
+
+This approach is something we’ve been doing even before React Server Components existed (like with Next.js Pages Router). Hopefully, this feels like familiar ground!
