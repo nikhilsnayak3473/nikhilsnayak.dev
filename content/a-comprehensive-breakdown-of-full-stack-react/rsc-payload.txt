@@ -1,0 +1,12 @@
+1:{"name":"App","env":"Server","key":null,"owner":null,"props":{}}
+0:D"$1"
+3:{"name":"MoviesList","env":"Server","key":null,"owner":"$1","props":{"movies":[{"id":1,"title":"The Dark Knight","votes":0},{"id":2,"title":"Interstellar","votes":0}]}}
+2:D"$3"
+5:{"name":"Vote","env":"Server","key":null,"owner":"$3","props":{"id":1,"action":"$undefined"}}
+4:D"$5"
+4:["$","div",null,{"children":[["$","form",null,{"action":"$undefined","children":[["$","input",null,{"name":"id","value":1,"hidden":true,"readOnly":true},"$5"],["$","input",null,{"name":"type","value":"upVote","hidden":true,"readOnly":true},"$5"],["$","button",null,{"type":"submit","children":"↑"},"$5"]]},"$5"],["$","form",null,{"action":"$undefined","children":[["$","input",null,{"name":"id","value":1,"hidden":true,"readOnly":true},"$5"],["$","input",null,{"name":"type","value":"downVote","hidden":true,"readOnly":true},"$5"],["$","button",null,{"type":"submit","children":"↓"},"$5"]]},"$5"]]},"$5"]
+7:{"name":"Vote","env":"Server","key":null,"owner":"$3","props":{"id":2,"action":"$undefined"}}
+6:D"$7"
+6:["$","div",null,{"children":[["$","form",null,{"action":"$undefined","children":[["$","input",null,{"name":"id","value":2,"hidden":true,"readOnly":true},"$7"],["$","input",null,{"name":"type","value":"upVote","hidden":true,"readOnly":true},"$7"],["$","button",null,{"type":"submit","children":"↑"},"$7"]]},"$7"],["$","form",null,{"action":"$undefined","children":[["$","input",null,{"name":"id","value":2,"hidden":true,"readOnly":true},"$7"],["$","input",null,{"name":"type","value":"downVote","hidden":true,"readOnly":true},"$7"],["$","button",null,{"type":"submit","children":"↓"},"$7"]]},"$7"]]},"$7"]
+2:["$","ul",null,{"children":[["$","li","1",{"children":["$","div",null,{"children":["$4",["$","span",null,{"children":0},"$3"],["$","span",null,{"children":"The Dark Knight"},"$3"]]},"$3"]},"$3"],["$","li","2",{"children":["$","div",null,{"children":["$6",["$","span",null,{"children":0},"$3"],["$","span",null,{"children":"Interstellar"},"$3"]]},"$3"]},"$3"]]},"$3"]
+0:["$","html",null,{"lang":"en","children":[["$","head",null,{"children":[["$","meta",null,{"charSet":"UTF-8"},"$1"],["$","meta",null,{"name":"viewport","content":"width=device-width, initial-scale=1.0"},"$1"],["$","title",null,{"children":"Cine Score"},"$1"],["$","script",null,{"src":"https://cdn.tailwindcss.com"},"$1"]]},"$1"],["$","body",null,{"children":["$","div",null,{"children":["$","main",null,{"children":"$2"},"$1"]},"$1"]},"$1"]]},"$1"]

@@ -1,8 +1,9 @@
 import cineScoreThumbnail from './cine-score-thumbnail.png';
+import { RSCPayload } from './rsc-payload.tsx';
 
 ## Introduction
 
-Yes, you might have already guessed it from the title. Since React 19 is finally stable after the [Suspense Drama](https://tkdodo.eu/blog/react-19-and-suspense-a-drama-in-3-acts), complete with a neat solution called [Prewarming](https://github.com/facebook/react/issues/29898#issuecomment-2477449973), we can finally dive deep into [**React Server Components**](https://react.dev/reference/rsc/server-components). No more noise about them being experimental, canary, or any of that.
+Yes, you might have already guessed it from the title, we are finally diving deep into [**React Server Components**](https://react.dev/reference/rsc/server-components). Since React 19 is finally stable no more noise about RSCs being experimental, canary, or any of that.
 
 We'll explore React's full-stack architecture by building a simple full-stack app called **Cine Score**. In this app, users can browse a list of movies, up-vote or down-vote a movie, and search through the collection. Here's a sneak peek at what we'll create:
 
@@ -12,7 +13,7 @@ Not excited yet? 🤔 What if I told you we'd build this app _without_ using any
 
 By the end of this post, I aim to give you a _solid_ understanding of how RSC frameworks work under the hood. This way, you'll be able to use these frameworks wisely instead of fighting them.
 
-> **Disclaimer:** All the code and implementation details discussed in this post are for educational purposes only and are not intended for production use.
+> **Disclaimer:** All the code and implementation details discussed in this post are for educational purposes only and are not intended for production use. If you are already familiar working with RSCs in frameworks like Next.js it would help a lot understanding this deep dive
 
 ## Project Setup
 
@@ -87,8 +88,8 @@ cine-score/
   "name": "cine-score",
   "scripts": {
     "build": "node build.js",
-    "dev": "node server.js",
-    "start": "npm run build && npm run dev"
+    "server": "node server.js",
+    "start": "npm run build && npm run server"
   },
   "dependencies": {
     "@babel/core": "^7.26.0",
@@ -113,7 +114,7 @@ const path = require('path');
 const webpack = require('webpack');
 
 const builder = webpack({
-  mode: 'development',
+  mode: process.env.NODE_ENV ?? 'development',
   entry: path.resolve(__dirname, './client.js'),
   output: {
     path: path.resolve(__dirname, './dist'),
@@ -183,23 +184,21 @@ export function App() {
   const [movies, setMovies] = useState(initialMovies);
   const [query, setQuery] = useState('');
 
-  const voteFn = async (voted, formData) => {
-    if (voted) return true;
-
+  const voteFn = (formData) => {
     const id = Number(formData.get('id'));
     const type = formData.get('type');
 
-    setMovies((prev) =>
-      prev.map((movie) =>
-        movie.id === id
-          ? {
-              ...movie,
-              votes: type === 'upVote' ? movie.votes + 1 : movie.votes - 1,
-            }
-          : movie
-      )
-    );
-    return true;
+    setMovies((prev) => {
+      return prev.map((movie) => {
+        if (movie.id === id) {
+          return {
+            ...movie,
+            votes: type === 'upVote' ? movie.votes + 1 : movie.votes - 1,
+          };
+        }
+        return movie;
+      });
+    });
   };
 
   let filteredMovies = movies;
@@ -252,14 +251,14 @@ export function Search({ onSearch }) {
     <search className='relative mb-6 px-4'>
       <form>
         <input
-          type='text'
+          type='search'
           placeholder='Search movies...'
-          className='w-full rounded-md border border-gray-700 bg-gray-800 px-8 py-2 text-gray-300 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500'
+          className='w-full rounded-md border border-gray-700 bg-gray-800 px-8 py-2 text-gray-300 placeholder-gray-500 focus:ring-2 focus:ring-indigo-500 focus:outline-none'
           onChange={handleChange}
         />
       </form>
       {isSearching && (
-        <div className='absolute right-6 top-1/2 -translate-y-1/2'>
+        <div className='absolute top-1/2 right-6 -translate-y-1/2'>
           <div className='size-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-500' />
         </div>
       )}
@@ -310,32 +309,24 @@ export function MoviesList({ movies, voteFn }) {
 <TabsContent value='vote.js'>
 
 ```js
-import { useActionState } from 'react';
-
 export function Vote({ id, action }) {
-  const [isVoted, formAction] = useActionState(action, false);
-
   return (
     <div className='flex items-center gap-4'>
-      <form action={formAction}>
+      <form action={action}>
         <input name='id' value={id} hidden readOnly />
         <input name='type' value='upVote' hidden readOnly />
         <button
-          disabled={isVoted}
           className='text-xl text-green-400 focus:outline-none disabled:opacity-50'
-          aria-label='Upvote'
           type='submit'
         >
           ↑
         </button>
       </form>
-      <form action={formAction}>
+      <form action={action}>
         <input name='id' value={id} hidden readOnly />
         <input name='type' value='downVote' hidden readOnly />
         <button
-          disabled={isVoted}
           className='text-xl text-red-400 focus:outline-none disabled:opacity-50'
-          aria-label='Downvote'
           type='submit'
         >
           ↓
@@ -368,7 +359,7 @@ const PORT = 1234;
 
 app.use(express.static(path.join(__dirname, 'dist')));
 
-app.get('/', (req, res) => {
+function handleRequest(req, res) {
   try {
     const tree = React.createElement(App);
     const htmlStream = ReactDOMServer.renderToPipeableStream(tree, {
@@ -381,7 +372,9 @@ app.get('/', (req, res) => {
     console.log({ error });
     res.status(500).send('Internal Server Error');
   }
-});
+}
+
+app.get('/', handleRequest);
 
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
@@ -394,10 +387,238 @@ app.listen(PORT, () => {
 
 Let’s break this down:
 
-- **package.json**: Includes two important scripts, `build` and `dev`.
 - **build.js**: A standard Webpack setup, including `babel-loader`, to transpile and bundle dependencies for the browser. The entry point for compilation is client.js, with output in the `dist` folder.
 - **client.js**: Hydrates the server-generated HTML using `hydrateRoot` from `react-dom/client`. The application entry point is app.js.
-- **app.js**: Contains the `App` component, which builds the entire document. It uses client-side state for managing movies like searching and voting. The `Vote` component utilizes React 19's `useActionState` for handling form actions efficiently. For a deeper dive into this pattern, check out my previous blog: [The True Nature of useActionState](https://www.nikhilsnayak.dev/blogs/the-true-nature-of-use-action-state).
+- **app.js**: Contains the `App` component, which builds the entire document. It uses client-side state for managing movies like searching and voting. The `Vote` component utilizes React 19's form actions for vote up-vote/down-vote functionality.
 - **server.js**: A minimal HTTP server built with Express. It leverages `@babel/register` to enable on-the-fly JSX transpilation and CommonJS compatibility without a pre-compilation step. Static assets are served from the `dist` folder, and the `renderToPipeableStream` method from `react-dom/server` is used to stream the server-rendered `App` component to the client efficiently.
 
-This approach is something we’ve been doing even before React Server Components existed (like with Next.js Pages Router). Hopefully, this feels like familiar ground!
+This approach is something we’ve been doing even before React Server Components existed (like with Next.js Pages Router). Hopefully, this feels like familiar ground!. Now that we have something as a starting point, let's get into the fun part.
+
+## Flight - React Server Component
+
+So what exactly is RSC?
+
+> React Server Components is a serialization and deserialization capability that supports the serialization of a superset of `structuredClone` across network boundaries. This superset includes Symbols, Promises, Iterators and Iterables, async Iterators and Iterables, React Primitives such as Function Components, `Suspense`, Client References, and Server References.
+
+Okay, that's a big definition. Let's break it down.
+
+You’ve probably used `JSON.stringify` and `JSON.parse` to serialize/de-serialize data for transmission over the wire. However, `JSON.stringify` has limitations it can't serialize certain types like `undefined`, `Symbol`, `Map`, or `Set`. These restrictions limit the types of data we can transmit.
+
+This is where RSC comes in. It supports serializing all types covered by the [Structured Clone Algorithm](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Structured_clone_algorithm) and extends it to include additional types like Symbols, Promises, and even React-specific constructs such as Function Components, `Suspense`, Client References and Server References.
+
+To make use of RSCs we need a RSC compatible bundler (more on why bundler is required is covered later in the post). At the time of writing this post, these are the bundlers with official implementations
+
+1. [Parcel](https://parceljs.org/)
+2. [Turbopack](https://turbo.build/pack/docs)
+3. [Webpack](https://webpack.js.org/)
+
+Parcel does a lot of heavy lifting and also hides a lot of API's to make it easy for integrating RSCs for production ready apps but we have less opportunity of learning here.
+
+At the time of writing, turbopack is only available for Next.js development server and we cannot use turbopack outside of Next.js
+
+Luckily we have webpack which is only a thin wrapper on top of core RSC renderer with webpack specific stuff. That's why we choose webpack as the bundler initially. Technically we can use other bundlers like esbuild with webpack implementation by monkey patching the webpack internals. But I don't want to deal with all those stuff so we are sticking with webpack and trust me it is perfectly fine for understanding core RSC implementation and all of this learnings will be the same regardless of which bundler you choose
+
+`react-server-dom-webpack` is the official package maintained by React Core team which implements RSCs for webpack bundler. This package expose a set of utilities to leverage serialization and deserialization capabilities of RSCs. We have an option to choose between Node.js Streams and Web Stream APIs. The choice entirely depends on the use case. If your implementation needs to be runtime agnostic you can choose Web Stream APIs. Since we are just learning let's stick with Node.js Stream APIs.
+
+Just like `react-dom/server` which provides `renderToPipeableStream` API to transform React tree into HTML, `react-server-dom-webpack/server` also provides `renderToPipeableStream` API to serialize a React tree into something called RSC Payload which can be transmitted over the wire.
+
+As we already know RSC has the capability of serializing promises, we can make our Function Components as `async` and fetch the data required to render the UI directly inside the component itself avoiding client-server waterfall.
+
+Enough of the theory let's convert our Plain SSR app to leverage RSC and understand it's capabilities.
+
+Install the following dependency
+
+```bash
+npm install react-server-dom-webpack sqlite3
+```
+
+To make our lives easier, I have already seeded the data into a SQLite DB and defined some helper functions to interact with the database so that we can focus only on RSC.
+
+<Tabs defaultValue='app.js'>
+
+<ScrollArea className='w-full'>
+  <TabsList>
+    <TabsTrigger value='app.js'>app.js</TabsTrigger>
+    <TabsTrigger value='server.js'>server.js</TabsTrigger>
+  </TabsList>
+  <ScrollBar orientation='horizontal' />
+</ScrollArea>
+
+<TabsContent value='app.js'>
+
+```js lineNumbers addition="3,42,43,58" deletion="1,5,7-11,13-40,56,57"
+import { useState } from 'react';
+
+import { getMovies } from './db';
+import { MoviesList } from './movie-list';
+import { Search } from './search';
+
+const initialMovies = [
+  { votes: 0, id: 1, title: 'The Dark Knight' },
+  { votes: 0, id: 2, title: 'Interstellar' },
+  // ...............
+];
+
+export function App() {
+  const [movies, setMovies] = useState(initialMovies);
+  const [query, setQuery] = useState('');
+
+  const voteFn = (formData) => {
+    const id = Number(formData.get('id'));
+    const type = formData.get('type');
+
+    setMovies((prev) => {
+      return prev.map((movie) => {
+        if (movie.id === id) {
+          return {
+            ...movie,
+            votes: type === 'upVote' ? movie.votes + 1 : movie.votes - 1,
+          };
+        }
+        return movie;
+      });
+    });
+  };
+
+  let filteredMovies = movies;
+
+  if (query) {
+    filteredMovies = movies.filter((movie) =>
+      movie.title.toLowerCase().includes(query.toLowerCase())
+    );
+  }
+
+export async function App() {
+  const movies = await getMovies();
+
+  return (
+    <html lang='en'>
+      <head>
+        <meta charSet='UTF-8' />
+        <meta name='viewport' content='width=device-width, initial-scale=1.0' />
+        <title>Cine Score</title>
+        <script src='https://cdn.tailwindcss.com'></script>
+      </head>
+      <body>
+        <div className='font-geist flex min-h-[100dvh] flex-col bg-gray-900 text-gray-200'>
+          <main className='container mx-auto max-w-lg flex-grow px-4 py-8'>
+            <Search onSearch={setQuery} />
+            <MoviesList voteFn={voteFn} movies={filteredMovies} />
+            <MoviesList movies={movies} />
+          </main>
+        </div>
+      </body>
+    </html>
+  );
+}
+```
+
+</TabsContent>
+
+<TabsContent value='server.js'>
+
+```js lineNumbers addition="11,28,29" deletion="10,22-27"
+require('@babel/register')({
+  ignore: [/[\\\/](dist|node_modules)[\\\/]/],
+  presets: [['@babel/preset-react', { runtime: 'automatic' }]],
+  plugins: ['@babel/plugin-transform-modules-commonjs'],
+});
+
+const express = require('express');
+const path = require('path');
+const React = require('react');
+const ReactDOMServer = require('react-dom/server');
+const ReactServerDOMWebpack = require('react-server-dom-webpack/server');
+const { App } = require('./app');
+
+const app = express();
+const PORT = 1234;
+
+app.use(express.static(path.join(__dirname, 'dist')));
+
+function handleRequest(req, res) {
+  try {
+    const tree = React.createElement(App);
+    const htmlStream = ReactDOMServer.renderToPipeableStream(tree, {
+      bootstrapScripts: ['/client.js'],
+      onShellReady: () => {
+        htmlStream.pipe(res);
+      },
+    });
+    const rscStream = ReactServerDOMWebpack.renderToPipeableStream(tree);
+    rscStream.pipe(res);
+  } catch (error) {
+    console.log({ error });
+    res.status(500).send('Internal Server Error');
+  }
+}
+
+app.get('/', handleRequest);
+
+app.listen(PORT, () => {
+  console.log(`Server is running on http://localhost:${PORT}`);
+});
+```
+
+</TabsContent>
+
+</Tabs>
+
+Let's go over the diff and understand the changes.
+
+Firstly, we can directly fetch the movies list inside the `App` by making the `App` component `async` thanks to RSC capability of serializing Promises. I have intentionally removed the `Search` component and vote function. We’ll get to those later in the post, but for now, bear with me.
+
+In the server.js, we have used `renderToPipeableStream` from `react-server-dom-webpack` instead of `react-dom/server`. From what we understood earlier, when we run our server, everything should work right?
+
+Sadly, it isn’t that straightforward. You’ll encounter an error stating:
+
+> The React Server Writer cannot be used outside a react-server environment. You must configure Node.js using the `--conditions react-server` flag
+
+When I first encountered this error, I searched through the internet and github issues but found nothing because nothing is documented yet. I taught that this stuff isn't meant for me. When I revisited it later, I realized the error itself gives you the solution, and I failed to understand it due to skill issues.
+
+### The react-server Conditional Export
+
+The solution is that you must configure Node.js to use the `--conditions react-server` flag. I’m sure many of you, like me, might not have heard of this before. So, I started exploring the Node.js documentation and found that we should use the `react-server` conditional export to utilize RSC. The `--conditions` flag is a CLI option in Node.js where we can pass `react-server` as the value for custom conditional exports resolution.
+
+Discussing conditional exports in detail is beyond the scope of this article, but you can learn more about them in the Node.js documentation linked [here](https://nodejs.org/api/packages.html#conditional-exports).
+
+> Why do we need to do this? Honestly, I don’t have a perfect answer. From what I understand, it acts as a guard clause to prevent React’s server APIs from leaking into the client environment. Again, this might not be entirely correct. If you have a better explanation, please leave a comment below—it will help me and other readers gain a clearer understanding.
+
+To fix the issue, let’s update the `package.json` file by adding the required CLI flag:
+
+```json lineNumbers filename="package.json" addition="6,16,17" deletion="5"
+{
+  "name": "cine-score",
+  "scripts": {
+    "build": "node build.js",
+    "server": "node server.js",
+    "server": "node --conditions react-server server.js",
+    "start": "npm run build && npm run server"
+  },
+  "dependencies": {
+    "@babel/core": "^7.26.0",
+    "@babel/plugin-transform-modules-commonjs": "^7.26.3",
+    "@babel/preset-react": "^7.26.3",
+    "@babel/register": "^7.25.9",
+    "babel-loader": "^9.2.1",
+    "express": "^4.21.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-server-dom-webpack": "^19.0.0",
+    "sqlite3": "^5.1.7",
+    "webpack": "^5.97.1"
+  }
+}
+```
+
+If we run the server now, it will start successfully. However, when you visit the dev server in your browser, you will see a bunch of what appears to be garbage text instead of the beautiful movie listing UI we had earlier.
+
+Is this text really garbage? How do we get back our beautiful UI? Let’s address these questions step by step.
+
+### RSC Payload
+
+I’ve often seen tutorials and articles describe React Server Components (RSCs) as React components that only run on the server, return HTML to the browser, and never run on the client. Honestly, I believed the same when I first came across RSCs, but sadly, that is not true. This might be one of the main reasons for the confusion surrounding RSCs. The idea that RSCs run only on the server and never on the client is **partially true**, but the claim that RSCs return HTML is completely false.
+
+By now, we already know that RSC is a serialization/deserialization capability. The "garbage text" is nothing but the serialized version of the React tree that we passed as input to `renderToPipeableStream`. Here’s a stripped-down version of the RSC payload for our `App` component:
+
+<RSCPayload />
