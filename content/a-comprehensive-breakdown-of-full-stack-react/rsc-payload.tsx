@@ -12,5 +12,5 @@ export async function RSCPayload() {
     'utf-8'
   );
 
-  return <pre>{rscPayload}</pre>;
+  return <pre className='text-foreground'>{rscPayload}</pre>;
 }

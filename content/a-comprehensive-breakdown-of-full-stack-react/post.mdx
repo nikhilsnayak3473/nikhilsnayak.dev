@@ -446,7 +446,7 @@ To make our lives easier, I have already seeded the data into a SQLite DB and de
 
 <TabsContent value='app.js'>
 
-```js lineNumbers addition="3,42,43,58" deletion="1,5,7-11,13-40,56,57"
+```js lineNumbers addition="3,42,43,58" deletion="1,5-40,56,57"
 import { useState } from 'react';
 
 import { getMovies } from './db';
@@ -528,7 +528,7 @@ const express = require('express');
 const path = require('path');
 const React = require('react');
 const ReactDOMServer = require('react-dom/server');
-const ReactServerDOMWebpack = require('react-server-dom-webpack/server');
+const ReactServerDOMWebpackServer = require('react-server-dom-webpack/server');
 const { App } = require('./app');
 
 const app = express();
@@ -545,7 +545,7 @@ function handleRequest(req, res) {
         htmlStream.pipe(res);
       },
     });
-    const rscStream = ReactServerDOMWebpack.renderToPipeableStream(tree);
+    const rscStream = ReactServerDOMWebpackServer.renderToPipeableStream(tree);
     rscStream.pipe(res);
   } catch (error) {
     console.log({ error });
@@ -622,3 +622,77 @@ I’ve often seen tutorials and articles describe React Server Components (RSCs)
 By now, we already know that RSC is a serialization/deserialization capability. The "garbage text" is nothing but the serialized version of the React tree that we passed as input to `renderToPipeableStream`. Here’s a stripped-down version of the RSC payload for our `App` component:
 
 <RSCPayload />
+
+Let’s try to understand this output:
+
+The first line represents our `App` component, prefixed with `1`. If you observe the second line, there is some mapping occurring between `0` and `1`. The line with the prefix `0` is the JSX returned from the `App` component. This indicates that the function component is mapped to its returned JSX. The same pattern is followed for the entire React tree, where each component is mapped to its returned JSX.
+
+One interesting detail to observe is that since we didn’t pass any value to the `action` prop of the `MovieList` component, its value is `undefined`. As discussed earlier, the value `undefined` gets serialized to `"$undefined"`. If it were a normal `JSON.stringify`, the prop itself would have been omitted.
+
+Now that we understand what this text is, the next question is: **How do we get back the UI?**
+
+### Apply Fizz on Flight
+
+Just like how we have APIs to serialize the React tree into an RSC payload, we also have APIs to deserialize the RSC payload back into a React tree, provided by `react-server-dom-webpack/client`. Since we already have the capability of server-side rendering (SSR) the React tree—i.e., converting the React element tree into HTML—we can retrieve the React tree from the RSC payload and convert it into HTML using the APIs provided by `react-dom/server`. Let's dive into the code for better understanding:
+
+```js lineNumbers filename="server.js" addition="11,12,21,24-27,29" deletion="20,28"
+require('@babel/register')({
+  ignore: [/[\\\/](dist|node_modules)[\\\/]/],
+  presets: [['@babel/preset-react', { runtime: 'automatic' }]],
+  plugins: ['@babel/plugin-transform-modules-commonjs'],
+});
+
+const express = require('express');
+const path = require('path');
+const React = require('react');
+const ReactServerDOMWebpackServer = require('react-server-dom-webpack/server');
+const ReactServerDOMWebpackClient = require('react-server-dom-webpack/client');
+const ReactDOMServer = require('react-dom/server');
+const { App } = require('./app');
+
+const app = express();
+const PORT = 1234;
+
+app.use(express.static(path.join(__dirname, 'dist')));
+
+function handleRequest(req, res) {
+async function handleRequest(req, res) {
+  try {
+    const tree = React.createElement(App);
+    const rscStream = ReactServerDOMWebpackServer.renderToPipeableStream(tree);
+    const renderedReactTree =
+      await ReactServerDOMWebpackClient.createFromNodeStream(rscStream);
+    const htmlStream = ReactDOMServer.renderToPipeableStream(renderedReactTree);
+    rscStream.pipe(res);
+    htmlStream.pipe(res);
+  } catch (error) {
+    console.log({ error });
+    res.status(500).send('Internal Server Error');
+  }
+}
+
+app.get('/', handleRequest);
+
+app.listen(PORT, () => {
+  console.log(`Server is running on http://localhost:${PORT}`);
+});
+```
+
+We use the `createFromNodeStream` API from `react-server-dom-webpack/client` to deserialize the RSC payload back into a React tree. Then, we pass this tree to the `renderToPipeableStream` API from `react-dom/server` to convert the React tree into an HTML stream and send it to the browser.
+
+Ideally, when we run the server now, we should see our beautiful Movie list UI.
+
+However, we’ll encounter another error:
+
+> `react-dom/server` is not supported in React Server Components
+
+This time, it was relatively easy to figure out the cause of the error. Since we are using the `react-server` export condition to enable RSCs, the `react-dom/server` package cannot be imported under the `react-server` condition. Why doesn’t it work under the `react-server` export condition? As explained [earlier](#the-react-server-conditional-export), this is to prevent leaking React Server APIs into the client environment. Even though we are using the `react-dom/server` subpath, it is still a client-side library intended for DOM-related operations.
+
+The difficult part was finding a working solution for this error. At one point, I completely gave up on SSR and switched entirely to CSR. To my surprise, the CSR approach worked as expected, which motivated me to revisit the SSR implementation. After a month of struggling, I found two ways to address this:
+
+1. Two separate servers: one for SSR and one for RSC, where the SSR server proxies incoming requests from the browser to the RSC server, retrieves the RSC payload, and converts it into HTML.
+2. A single server with worker threads for SSR.
+
+The first approach is relatively simple to set up and get working. However, we’ll choose the second approach because:
+
+> I don’t want peace; I want problems ALWAYS!!! 😂
