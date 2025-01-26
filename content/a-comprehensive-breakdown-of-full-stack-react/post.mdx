@@ -635,7 +635,7 @@ Now that we understand what this text is, the next question is: **How do we get 
 
 Just like how we have APIs to serialize the React tree into an RSC payload, we also have APIs to deserialize the RSC payload back into a React tree, provided by `react-server-dom-webpack/client`. Since we already have the capability of server-side rendering (SSR) the React tree—i.e., converting the React element tree into HTML—we can retrieve the React tree from the RSC payload and convert it into HTML using the APIs provided by `react-dom/server`. Let's dive into the code for better understanding:
 
-```js lineNumbers filename="server.js" addition="11,12,21,24-27,29" deletion="20,28"
+```js lineNumbers filename="server.js" addition="11,12,21,25-28,30-37" deletion="20,29"
 require('@babel/register')({
   ignore: [/[\\\/](dist|node_modules)[\\\/]/],
   presets: [['@babel/preset-react', { runtime: 'automatic' }]],
@@ -661,10 +661,18 @@ async function handleRequest(req, res) {
     const tree = React.createElement(App);
     const rscStream = ReactServerDOMWebpackServer.renderToPipeableStream(tree);
     const renderedReactTree =
-      await ReactServerDOMWebpackClient.createFromNodeStream(rscStream);
-    const htmlStream = ReactDOMServer.renderToPipeableStream(renderedReactTree);
+      await ReactServerDOMWebpackClient.createFromNodeStream(rscStream, {
+        moduleMap: {},
+      });
     rscStream.pipe(res);
-    htmlStream.pipe(res);
+    const htmlStream = ReactDOMServer.renderToPipeableStream(
+      renderedReactTree,
+      {
+        onShellReady: () => {
+          htmlStream.pipe(res);
+        },
+      }
+    );
   } catch (error) {
     console.log({ error });
     res.status(500).send('Internal Server Error');
@@ -678,7 +686,7 @@ app.listen(PORT, () => {
 });
 ```
 
-We use the `createFromNodeStream` API from `react-server-dom-webpack/client` to deserialize the RSC payload back into a React tree. Then, we pass this tree to the `renderToPipeableStream` API from `react-dom/server` to convert the React tree into an HTML stream and send it to the browser.
+We use the `createFromNodeStream` API from `react-server-dom-webpack/client` to deserialize the RSC payload back into a React tree (Ignore the 2nd argument passed for now. We will discuss it in detail later). Then, we pass this tree to the `renderToPipeableStream` API from `react-dom/server` to convert the React tree into an HTML stream and send it to the browser.
 
 Ideally, when we run the server now, we should see our beautiful Movie list UI.
 
@@ -696,3 +704,184 @@ The difficult part was finding a working solution for this error. At one point, 
 The first approach is relatively simple to set up and get working. However, we’ll choose the second approach because:
 
 > I don’t want peace; I want problems ALWAYS!!! 😂
+
+#### Fizz Worker
+
+Let's implement the SSR logic in a separate file called `fizz-worker.js`. This worker is responsible for taking the RSC stream, converting it to an HTML stream, and sending the HTML stream back to the main thread.
+
+<Tabs defaultValue='fizz-worker.js'>
+
+<ScrollArea className='w-full'>
+  <TabsList>
+    <TabsTrigger value='fizz-worker.js'>fizz-worker.js</TabsTrigger>
+    <TabsTrigger value='server.js'>server.js</TabsTrigger>
+  </TabsList>
+  <ScrollBar orientation='horizontal' />
+</ScrollArea>
+
+<TabsContent value='fizz-worker.js'>
+
+```js
+const { parentPort } = require('worker_threads');
+const { Writable, PassThrough } = require('stream');
+const ReactServerDOMWebpackClient = require('react-server-dom-webpack/client');
+const ReactDOMServer = require('react-dom/server');
+
+parentPort.on('message', async (request) => {
+  const htmlConsumerRSCStream = new PassThrough();
+
+  request.port.on('message', (message) => {
+    if (message.type === 'data') {
+      htmlConsumerRSCStream.write(message.data);
+    } else if (message.type === 'end') {
+      htmlConsumerRSCStream.end();
+    }
+  });
+
+  const writableStream = new Writable({
+    write(chunk, encoding, callback) {
+      request.port.postMessage({
+        type: 'data',
+        data: chunk,
+      });
+      callback();
+    },
+    final(callback) {
+      request.port.postMessage({ type: 'end' });
+      callback();
+    },
+  });
+
+  const tree = await ReactServerDOMWebpackClient.createFromNodeStream(
+    htmlConsumerRSCStream,
+    {
+      moduleMap: {},
+    }
+  );
+
+  const htmlStream = ReactDOMServer.renderToPipeableStream(tree, {
+    onShellReady: () => {
+      htmlStream.pipe(writableStream);
+    },
+  });
+});
+```
+
+</TabsContent>
+
+<TabsContent value='server.js'>
+
+```js lineNumbers addition="13,14,20-22,42-75" deletion="11,12,30-41"
+require('@babel/register')({
+  ignore: [/[\\\/](dist|node_modules)[\\\/]/],
+  presets: [['@babel/preset-react', { runtime: 'automatic' }]],
+  plugins: ['@babel/plugin-transform-modules-commonjs'],
+});
+
+const express = require('express');
+const path = require('path');
+const React = require('react');
+const ReactServerDOMWebpackServer = require('react-server-dom-webpack/server');
+const ReactServerDOMWebpackClient = require('react-server-dom-webpack/client');
+const ReactDOMServer = require('react-dom/server');
+const { Worker, MessageChannel } = require('worker_threads');
+const { PassThrough } = require('stream');
+const { App } = require('./app');
+
+const app = express();
+const PORT = 1234;
+
+const fizzWorker = new Worker(path.resolve(__dirname, './fizz-worker.js'), {
+  execArgv: ['--conditions', 'default'],
+});
+
+app.use(express.static(path.join(__dirname, 'dist')));
+
+async function handleRequest(req, res) {
+  try {
+    const tree = React.createElement(App);
+    const rscStream = ReactServerDOMWebpackServer.renderToPipeableStream(tree);
+    const renderedReactTree =
+      await ReactServerDOMWebpackClient.createFromNodeStream(rscStream, {
+        moduleMap: {},
+      });
+    const htmlStream = ReactDOMServer.renderToPipeableStream(
+      renderedReactTree,
+      {
+        onShellReady: () => {
+          htmlStream.pipe(res);
+        },
+      }
+    );
+
+    res.setHeader('Content-Type', 'text/html');
+
+    const { port1, port2 } = new MessageChannel();
+
+    const request = {
+      port: port2,
+    };
+
+    fizzWorker.postMessage(request, [port2]);
+
+    const passThroughRSCStream = new PassThrough();
+    rscStream.pipe(passThroughRSCStream);
+
+    passThroughRSCStream.on('data', (data) => {
+      port1.postMessage({
+        type: 'data',
+        data,
+      });
+    });
+
+    passThroughRSCStream.on('end', () => {
+      port1.postMessage({
+        type: 'end',
+      });
+    });
+
+    port1.on('message', (message) => {
+      if (message.type === 'data') {
+        res.write(message.data);
+      } else if (message.type === 'end') {
+        res.end();
+      }
+    });
+  } catch (error) {
+    console.log({ error });
+    res.status(500).send('Internal Server Error');
+  }
+}
+
+app.get('/', handleRequest);
+
+app.listen(PORT, () => {
+  console.log(`Server is running on http://localhost:${PORT}`);
+});
+```
+
+</TabsContent>
+
+</Tabs>
+
+I get it. The code looks more complicated than before, but trust me, it's pretty straightforward. Let’s break it down.
+
+We use [`parentPort`](https://nodejs.org/api/worker_threads.html#workerparentport) from `worker_threads` to listen to incoming messages from the main thread. In the callback of the `message` event, we receive the data from the main thread. This data contains a message port transferred to the worker. A message port is one end of an asynchronous two-way communication channel that allows us to receive the RSC stream chunk by chunk and send back the HTML stream chunk by chunk.
+
+Since we can’t pass the RSC stream directly to the `createFromNodeStream` API, we use a [`PassThrough`](https://nodejs.org/api/stream.html#class-streampassthrough). This `PassThrough` acts as a proxy that takes in the RSC stream chunk by chunk and passes it as a [`Readable`](https://nodejs.org/api/stream.html#class-streamreadable) Node.js stream.
+
+We add a `message` event listener to the port received from the main thread. In the callback, we write the data to the `PassThrough` stream or close it based on the message type.
+
+Once we get the React tree from the RSC stream, we pass it to `renderToPipeableStream` from `react-dom/server` to generate the HTML stream.
+
+Since we can’t directly return the HTML stream to the main thread, we create a [`Writable`](https://nodejs.org/api/stream.html#class-streamwritable) and pipe the HTML stream into it. Inside the `write` method, we send the HTML chunk by chunk to the main thread using `port.postMessage`.
+
+In the main thread, we create a new [`Worker`](https://nodejs.org/api/worker_threads.html#class-worker) called `fizzWorker` with CLI args as `--conditions default` which is what enables use to use Reacts Client APIs. we use a [`MessageChannel`](https://nodejs.org/api/worker_threads.html#class-messagechannel), which provides `port1` and `port2`. We transfer `port2` to the worker thread using `worker.postMessage`. Since we can’t directly send the RSC stream to the worker, we use another `PassThrough` as a proxy to send data chunk by chunk by piping the RSC stream into it. Whenever we get a chunk from the RSC stream, we transfer it to the worker thread using `port1.postMessage`. On the worker side, the transferred `port2` receives the data.
+
+Finally, when we get the HTML stream back on `port1`, we write it to the response chunk by chunk.
+
+I know it might feel a bit complicated to understand how data is sent back and forth between the worker and the main thread. Try reading this explanation a couple more times along with the code. I’m confident it will start to make sense. 😊
+
+Now, run the server. We should see the UI, right?
+
+Yes! This time, no tricks—you’ll be able to see the Movie list UI. 🎉
