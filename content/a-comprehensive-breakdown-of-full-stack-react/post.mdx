@@ -17,9 +17,9 @@ By the end of this post, I aim to give you a _solid_ understanding of how RSC fr
 
 ## Project Setup
 
-We’ll start with a clean slate and build everything step by step. For simplicity, we won’t be using TypeScript. If you’d like to follow along, make sure you have the latest **LTS** version of Node.js installed.
+We'll start with a clean slate and build everything step by step. For simplicity, we won't be using TypeScript. If you'd like to follow along, make sure you have the latest **LTS** version of Node.js installed.
 
-Let’s create a new Node.js project:
+Let's create a new Node.js project:
 
 ```bash
 mkdir cine-score && cd cine-score && npm init -y
@@ -51,7 +51,7 @@ npm install express react react-dom webpack @babel/core @babel/register @babel/p
 
 Let's bootstrap the app in the traditional SSR way, as we've been doing since the early days of Next.js.
 
-Here’s the folder structure and the files in the SSR version:
+Here's the folder structure and the files in the SSR version:
 
 ```
 cine-score/
@@ -157,11 +157,7 @@ import ReactDOMClient from 'react-dom/client';
 
 import { App } from './app';
 
-function hydrateDocument() {
-  ReactDOMClient.hydrateRoot(document, <App />);
-}
-
-hydrateDocument();
+ReactDOMClient.hydrateRoot(document, <App />);
 ```
 
 </TabsContent>
@@ -385,14 +381,14 @@ app.listen(PORT, () => {
 
 </Tabs>
 
-Let’s break this down:
+Let's break this down:
 
 - **build.js**: A standard Webpack setup, including `babel-loader`, to transpile and bundle dependencies for the browser. The entry point for compilation is client.js, with output in the `dist` folder.
 - **client.js**: Hydrates the server-generated HTML using `hydrateRoot` from `react-dom/client`. The application entry point is app.js.
 - **app.js**: Contains the `App` component, which builds the entire document. It uses client-side state for managing movies like searching and voting. The `Vote` component utilizes React 19's form actions for vote up-vote/down-vote functionality.
 - **server.js**: A minimal HTTP server built with Express. It leverages `@babel/register` to enable on-the-fly JSX transpilation and CommonJS compatibility without a pre-compilation step. Static assets are served from the `dist` folder, and the `renderToPipeableStream` method from `react-dom/server` is used to stream the server-rendered `App` component to the client efficiently.
 
-This approach is something we’ve been doing even before React Server Components existed (like with Next.js Pages Router). Hopefully, this feels like familiar ground!. Now that we have something as a starting point, let's get into the fun part.
+This approach is something we've been doing even before React Server Components existed (like with Next.js Pages Router). Hopefully, this feels like familiar ground!. Now that we have something as a starting point, let's get into the fun part.
 
 ## Flight - React Server Component
 
@@ -402,7 +398,7 @@ So what exactly is RSC?
 
 Okay, that's a big definition. Let's break it down.
 
-You’ve probably used `JSON.stringify` and `JSON.parse` to serialize/de-serialize data for transmission over the wire. However, `JSON.stringify` has limitations it can't serialize certain types like `undefined`, `Symbol`, `Map`, or `Set`. These restrictions limit the types of data we can transmit.
+You've probably used `JSON.stringify` and `JSON.parse` to serialize/de-serialize data for transmission over the wire. However, `JSON.stringify` has limitations it can't serialize certain types like `undefined`, `Symbol`, `Map`, or `Set`. These restrictions limit the types of data we can transmit.
 
 This is where RSC comes in. It supports serializing all types covered by the [Structured Clone Algorithm](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Structured_clone_algorithm) and extends it to include additional types like Symbols, Promises, and even React-specific constructs such as Function Components, `Suspense`, Client References and Server References.
 
@@ -566,11 +562,11 @@ app.listen(PORT, () => {
 
 Let's go over the diff and understand the changes.
 
-Firstly, we can directly fetch the movies list inside the `App` by making the `App` component `async` thanks to RSC capability of serializing Promises. I have intentionally removed the `Search` component and vote function. We’ll get to those later in the post, but for now, bear with me.
+Firstly, we can directly fetch the movies list inside the `App` by making the `App` component `async` thanks to RSC capability of serializing Promises. I have intentionally removed the `Search` component and vote function. We'll get to those later in the post, but for now, bear with me.
 
 In the server.js, we have used `renderToPipeableStream` from `react-server-dom-webpack` instead of `react-dom/server`. From what we understood earlier, when we run our server, everything should work right?
 
-Sadly, it isn’t that straightforward. You’ll encounter an error stating:
+Sadly, it isn't that straightforward. You'll encounter an error stating:
 
 > The React Server Writer cannot be used outside a react-server environment. You must configure Node.js using the `--conditions react-server` flag
 
@@ -578,13 +574,13 @@ When I first encountered this error, I searched through the internet and github 
 
 ### The react-server Conditional Export
 
-The solution is that you must configure Node.js to use the `--conditions react-server` flag. I’m sure many of you, like me, might not have heard of this before. So, I started exploring the Node.js documentation and found that we should use the `react-server` conditional export to utilize RSC. The `--conditions` flag is a CLI option in Node.js where we can pass `react-server` as the value for custom conditional exports resolution.
+The solution is that you must configure Node.js to use the `--conditions react-server` flag. I'm sure many of you, like me, might not have heard of this before. So, I started exploring the Node.js documentation and found that we should use the `react-server` conditional export to utilize RSC. The `--conditions` flag is a CLI option in Node.js where we can pass `react-server` as the value for custom conditional exports resolution.
 
 Discussing conditional exports in detail is beyond the scope of this article, but you can learn more about them in the Node.js documentation linked [here](https://nodejs.org/api/packages.html#conditional-exports).
 
-> Why do we need to do this? Honestly, I don’t have a perfect answer. From what I understand, it acts as a guard clause to prevent React’s server APIs from leaking into the client environment. Again, this might not be entirely correct. If you have a better explanation, please leave a comment below—it will help me and other readers gain a clearer understanding.
+> Why do we need to do this? Honestly, I don't have a perfect answer. From what I understand, it acts as a guard clause to prevent React's server APIs from leaking into the client environment. Again, this might not be entirely correct. If you have a better explanation, please leave a comment below—it will help me and other readers gain a clearer understanding.
 
-To fix the issue, let’s update the `package.json` file by adding the required CLI flag:
+To fix the issue, let's update the `package.json` file by adding the required CLI flag:
 
 ```json lineNumbers filename="package.json" addition="6,16,17" deletion="5"
 {
@@ -613,21 +609,21 @@ To fix the issue, let’s update the `package.json` file by adding the required 
 
 If we run the server now, it will start successfully. However, when you visit the dev server in your browser, you will see a bunch of what appears to be garbage text instead of the beautiful movie listing UI we had earlier.
 
-Is this text really garbage? How do we get back our beautiful UI? Let’s address these questions step by step.
+Is this text really garbage? How do we get back our beautiful UI? Let's address these questions step by step.
 
 ### RSC Payload
 
-I’ve often seen tutorials and articles describe React Server Components (RSCs) as React components that only run on the server, return HTML to the browser, and never run on the client. Honestly, I believed the same when I first came across RSCs, but sadly, that is not true. This might be one of the main reasons for the confusion surrounding RSCs. The idea that RSCs run only on the server and never on the client is **partially true**, but the claim that RSCs return HTML is completely false.
+I've often seen tutorials and articles describe React Server Components (RSCs) as React components that only run on the server, return HTML to the browser, and never run on the client. Honestly, I believed the same when I first came across RSCs, but sadly, that is not true. This might be one of the main reasons for the confusion surrounding RSCs. The idea that RSCs run only on the server and never on the client is **partially true**, but the claim that RSCs return HTML is completely false.
 
-By now, we already know that RSC is a serialization/deserialization capability. The "garbage text" is nothing but the serialized version of the React tree that we passed as input to `renderToPipeableStream`. Here’s a stripped-down version of the RSC payload for our `App` component:
+By now, we already know that RSC is a serialization/deserialization capability. The "garbage text" is nothing but the serialized version of the React tree that we passed as input to `renderToPipeableStream`. Here's a stripped-down version of the RSC payload for our `App` component:
 
 <RSCPayload />
 
-Let’s try to understand this output:
+Let's try to understand this output:
 
 The first line represents our `App` component, prefixed with `1`. If you observe the second line, there is some mapping occurring between `0` and `1`. The line with the prefix `0` is the JSX returned from the `App` component. This indicates that the function component is mapped to its returned JSX. The same pattern is followed for the entire React tree, where each component is mapped to its returned JSX.
 
-One interesting detail to observe is that since we didn’t pass any value to the `action` prop of the `MovieList` component, its value is `undefined`. As discussed earlier, the value `undefined` gets serialized to `"$undefined"`. If it were a normal `JSON.stringify`, the prop itself would have been omitted.
+One interesting detail to observe is that since we didn't pass any value to the `action` prop of the `MovieList` component, its value is `undefined`. As discussed earlier, the value `undefined` gets serialized to `"$undefined"`. If it were a normal `JSON.stringify`, the prop itself would have been omitted.
 
 Now that we understand what this text is, the next question is: **How do we get back the UI?**
 
@@ -635,7 +631,8 @@ Now that we understand what this text is, the next question is: **How do we get 
 
 Just like how we have APIs to serialize the React tree into an RSC payload, we also have APIs to deserialize the RSC payload back into a React tree, provided by `react-server-dom-webpack/client`. Since we already have the capability of server-side rendering (SSR) the React tree—i.e., converting the React element tree into HTML—we can retrieve the React tree from the RSC payload and convert it into HTML using the APIs provided by `react-dom/server`. Let's dive into the code for better understanding:
 
-```js lineNumbers filename="server.js" addition="11,12,21,25-28,30-37" deletion="20,29"
+{/* prettier-ignore */}
+```js lineNumbers filename="server.js" addition="11,12,21,25-27,29-33" deletion="20,28"
 require('@babel/register')({
   ignore: [/[\\\/](dist|node_modules)[\\\/]/],
   presets: [['@babel/preset-react', { runtime: 'automatic' }]],
@@ -660,19 +657,15 @@ async function handleRequest(req, res) {
   try {
     const tree = React.createElement(App);
     const rscStream = ReactServerDOMWebpackServer.renderToPipeableStream(tree);
-    const renderedReactTree =
-      await ReactServerDOMWebpackClient.createFromNodeStream(rscStream, {
-        moduleMap: {},
-      });
+    const renderedReactTree = await ReactServerDOMWebpackClient.createFromNodeStream(rscStream, {
+      moduleMap: {},
+    });
     rscStream.pipe(res);
-    const htmlStream = ReactDOMServer.renderToPipeableStream(
-      renderedReactTree,
-      {
-        onShellReady: () => {
-          htmlStream.pipe(res);
-        },
-      }
-    );
+    const htmlStream = ReactDOMServer.renderToPipeableStream(renderedReactTree, {
+      onShellReady: () => {
+        htmlStream.pipe(res);
+      },
+    });
   } catch (error) {
     console.log({ error });
     res.status(500).send('Internal Server Error');
@@ -690,20 +683,20 @@ We use the `createFromNodeStream` API from `react-server-dom-webpack/client` to 
 
 Ideally, when we run the server now, we should see our beautiful Movie list UI.
 
-However, we’ll encounter another error:
+However, we'll encounter another error:
 
 > `react-dom/server` is not supported in React Server Components
 
-This time, it was relatively easy to figure out the cause of the error. Since we are using the `react-server` export condition to enable RSCs, the `react-dom/server` package cannot be imported under the `react-server` condition. Why doesn’t it work under the `react-server` export condition? As explained [earlier](#the-react-server-conditional-export), this is to prevent leaking React Server APIs into the client environment. Even though we are using the `react-dom/server` subpath, it is still a client-side library intended for DOM-related operations.
+This time, it was relatively easy to figure out the cause of the error. Since we are using the `react-server` export condition to enable RSCs, the `react-dom/server` package cannot be imported under the `react-server` condition. Why doesn't it work under the `react-server` export condition? As explained [earlier](#the-react-server-conditional-export), this is to prevent leaking React Server APIs into the client environment. Even though we are using the `react-dom/server` subpath, it is still a client-side library intended for DOM-related operations.
 
 The difficult part was finding a working solution for this error. At one point, I completely gave up on SSR and switched entirely to CSR. To my surprise, the CSR approach worked as expected, which motivated me to revisit the SSR implementation. After a month of struggling, I found two ways to address this:
 
 1. Two separate servers: one for SSR and one for RSC, where the SSR server proxies incoming requests from the browser to the RSC server, retrieves the RSC payload, and converts it into HTML.
 2. A single server with worker threads for SSR.
 
-The first approach is relatively simple to set up and get working. However, we’ll choose the second approach because:
+The first approach is relatively simple to set up and get working. However, we'll choose the second approach because:
 
-> I don’t want peace; I want problems ALWAYS!!! 😂
+> I don't want peace; I want problems ALWAYS!!! 😂
 
 #### Fizz Worker
 
@@ -721,6 +714,7 @@ Let's implement the SSR logic in a separate file called `fizz-worker.js`. This w
 
 <TabsContent value='fizz-worker.js'>
 
+{/* prettier-ignore */}
 ```js
 const { parentPort } = require('worker_threads');
 const { Writable, PassThrough } = require('stream');
@@ -752,12 +746,9 @@ parentPort.on('message', async (request) => {
     },
   });
 
-  const tree = await ReactServerDOMWebpackClient.createFromNodeStream(
-    htmlConsumerRSCStream,
-    {
-      moduleMap: {},
-    }
-  );
+  const tree = await ReactServerDOMWebpackClient.createFromNodeStream(htmlConsumerRSCStream, {
+    moduleMap: {},
+  });
 
   const htmlStream = ReactDOMServer.renderToPipeableStream(tree, {
     onShellReady: () => {
@@ -771,7 +762,8 @@ parentPort.on('message', async (request) => {
 
 <TabsContent value='server.js'>
 
-```js lineNumbers addition="13,14,20-22,42-75" deletion="11,12,30-41"
+{/* prettier-ignore */}
+```js lineNumbers addition="13,14,20-22,38-71" deletion="11,12,30-37"
 require('@babel/register')({
   ignore: [/[\\\/](dist|node_modules)[\\\/]/],
   presets: [['@babel/preset-react', { runtime: 'automatic' }]],
@@ -801,18 +793,14 @@ async function handleRequest(req, res) {
   try {
     const tree = React.createElement(App);
     const rscStream = ReactServerDOMWebpackServer.renderToPipeableStream(tree);
-    const renderedReactTree =
-      await ReactServerDOMWebpackClient.createFromNodeStream(rscStream, {
-        moduleMap: {},
-      });
-    const htmlStream = ReactDOMServer.renderToPipeableStream(
-      renderedReactTree,
-      {
-        onShellReady: () => {
-          htmlStream.pipe(res);
-        },
-      }
-    );
+    const renderedReactTree = await ReactServerDOMWebpackClient.createFromNodeStream(rscStream, {
+      moduleMap: {},
+    });
+    const htmlStream = ReactDOMServer.renderToPipeableStream(renderedReactTree, {
+      onShellReady: () => {
+        htmlStream.pipe(res);
+      },
+    });
 
     res.setHeader('Content-Type', 'text/html');
 
@@ -864,24 +852,345 @@ app.listen(PORT, () => {
 
 </Tabs>
 
-I get it. The code looks more complicated than before, but trust me, it's pretty straightforward. Let’s break it down.
+I get it. The code looks more complicated than before, but trust me, it's pretty straightforward. Let's break it down.
 
 We use [`parentPort`](https://nodejs.org/api/worker_threads.html#workerparentport) from `worker_threads` to listen to incoming messages from the main thread. In the callback of the `message` event, we receive the data from the main thread. This data contains a message port transferred to the worker. A message port is one end of an asynchronous two-way communication channel that allows us to receive the RSC stream chunk by chunk and send back the HTML stream chunk by chunk.
 
-Since we can’t pass the RSC stream directly to the `createFromNodeStream` API, we use a [`PassThrough`](https://nodejs.org/api/stream.html#class-streampassthrough). This `PassThrough` acts as a proxy that takes in the RSC stream chunk by chunk and passes it as a [`Readable`](https://nodejs.org/api/stream.html#class-streamreadable) Node.js stream.
+Since we can't pass the RSC stream directly to the `createFromNodeStream` API, we use a [`PassThrough`](https://nodejs.org/api/stream.html#class-streampassthrough). This `PassThrough` acts as a proxy that takes in the RSC stream chunk by chunk and passes it as a [`Readable`](https://nodejs.org/api/stream.html#class-streamreadable) Node.js stream.
 
 We add a `message` event listener to the port received from the main thread. In the callback, we write the data to the `PassThrough` stream or close it based on the message type.
 
 Once we get the React tree from the RSC stream, we pass it to `renderToPipeableStream` from `react-dom/server` to generate the HTML stream.
 
-Since we can’t directly return the HTML stream to the main thread, we create a [`Writable`](https://nodejs.org/api/stream.html#class-streamwritable) and pipe the HTML stream into it. Inside the `write` method, we send the HTML chunk by chunk to the main thread using `port.postMessage`.
+Since we can't directly return the HTML stream to the main thread, we create a [`Writable`](https://nodejs.org/api/stream.html#class-streamwritable) and pipe the HTML stream into it. Inside the `write` method, we send the HTML chunk by chunk to the main thread using `port.postMessage`.
 
-In the main thread, we create a new [`Worker`](https://nodejs.org/api/worker_threads.html#class-worker) called `fizzWorker` with CLI args as `--conditions default` which is what enables use to use Reacts Client APIs. we use a [`MessageChannel`](https://nodejs.org/api/worker_threads.html#class-messagechannel), which provides `port1` and `port2`. We transfer `port2` to the worker thread using `worker.postMessage`. Since we can’t directly send the RSC stream to the worker, we use another `PassThrough` as a proxy to send data chunk by chunk by piping the RSC stream into it. Whenever we get a chunk from the RSC stream, we transfer it to the worker thread using `port1.postMessage`. On the worker side, the transferred `port2` receives the data.
+In the main thread, we create a new [`Worker`](https://nodejs.org/api/worker_threads.html#class-worker) called `fizzWorker` with CLI args as `--conditions default` which is what enables use to use Reacts Client APIs. we use a [`MessageChannel`](https://nodejs.org/api/worker_threads.html#class-messagechannel), which provides `port1` and `port2`. We transfer `port2` to the worker thread using `worker.postMessage`. Since we can't directly send the RSC stream to the worker, we use another `PassThrough` as a proxy to send data chunk by chunk by piping the RSC stream into it. Whenever we get a chunk from the RSC stream, we transfer it to the worker thread using `port1.postMessage`. On the worker side, the transferred `port2` receives the data.
 
 Finally, when we get the HTML stream back on `port1`, we write it to the response chunk by chunk.
 
-I know it might feel a bit complicated to understand how data is sent back and forth between the worker and the main thread. Try reading this explanation a couple more times along with the code. I’m confident it will start to make sense. 😊
+I know it might feel a bit complicated to understand how data is sent back and forth between the worker and the main thread. Try reading this explanation a couple more times along with the code. I'm confident it will start to make sense. 😊
 
 Now, run the server. We should see the UI, right?
 
-Yes! This time, no tricks—you’ll be able to see the Movie list UI. 🎉
+Yes! This time, no tricks—you'll be able to see the Movie list UI. 🎉
+
+Now that we have set up the base for RSC, let's bring back the parts we left out when converting pure SSR into RSC, specifically the `Search` component and the vote functionality.
+
+We've been ignoring an important aspect of the application. While async components for data fetching and SSR are great, where is React's main selling point client-side interactivity?
+
+To enable this, we need to hydrate the server-generated HTML and activate React on the client side. Let's explore how we can achieve this.
+
+### Hydration for Client Interactivity
+
+When it comes to hydration, there are two essential pieces needed on the client side:
+
+1. **Server-generated HTML**
+2. **The React tree that was used to generate this HTML**
+
+Getting a reference to the server-generated HTML is straightforward. In our case, since we're performing full-document SSR, the entire HTML document is generated on the server. The browser's `document` API provides a reference to this server-generated HTML.
+
+The tricky part, however, is retrieving the React tree that was used to generate this HTML. This is because the React tree was created from the RSC payload.
+
+In traditional SSR, we could import the same React tree on both the server and the client. However, in this case, we need to retrieve the RSC payload somehow. One approach could be to send another request to fetch just the RSC payload and then start the hydration process. However, this has three major disadvantages:
+
+1. It creates a **client-server waterfall**, defeating the purpose of async server components.
+2. It introduces **double data fetching**: once for the HTML and again for the RSC payload.
+3. We **cannot start hydration** until the RSC payload request completes, leading to a bad user experience.
+
+But what if we could fetch both the HTML and the RSC payload in a single request? That would eliminate these disadvantages. And yes, this is achievable!
+
+#### Injecting the RSC Payload into the HTML Stream
+
+We can retrieve both the HTML and the RSC payload in a single request by injecting the RSC payload into the HTML stream itself.
+
+The following code is adapted from the [rsc-html-stream](https://www.npmjs.com/package/rsc-html-stream) package. Big thanks to [@devongovett](https://x.com/devongovett) for publishing this package. While I would have directly used the package, it relies on Web Streams instead of Node Streams. As a result, I made some changes, though the core logic remains the same.
+
+There are two parts to this implementation:
+
+1. **The server**, where we inject the RSC payload into the HTML stream.
+2. **The client**, where we retrieve the injected chunks and convert them into a readable stream.
+
+Here's the code:
+
+<Tabs defaultValue='rsc-html-stream/server.js'>
+
+<ScrollArea className='w-full'>
+  <TabsList>
+    {/* prettier-ignore */}
+    <TabsTrigger value='rsc-html-stream/server.js'>rsc-html-stream/server.js</TabsTrigger>
+    {/* prettier-ignore */}
+    <TabsTrigger value='rsc-html-stream/client.js'>rsc-html-stream/client.js</TabsTrigger>
+  </TabsList>
+  <ScrollBar orientation='horizontal' />
+</ScrollArea>
+
+<TabsContent value='rsc-html-stream/server.js'>
+
+{/* prettier-ignore */}
+```js
+// https://github.com/devongovett/rsc-html-stream/blob/main/server.js
+
+const { Transform } = require('stream');
+const { TextEncoder, TextDecoder } = require('util');
+
+const encoder = new TextEncoder();
+const trailer = '</body></html>';
+
+function injectRSCPayload(rscStream) {
+  const decoder = new TextDecoder();
+
+  const { 
+    promise: flightDataPromise, 
+    resolve: resolveFlightDataPromise 
+  } = Promise.withResolvers();
+
+  const buffered = [];
+  let startedRSC = false;
+  let timeout = null;
+
+  function flushBufferedChunks(transform) {
+    for (const chunk of buffered) {
+      let buf = decoder.decode(chunk);
+      if (buf.endsWith(trailer)) {
+        buf = buf.slice(0, -trailer.length);
+      }
+      transform.push(encoder.encode(buf));
+    }
+
+    buffered.length = 0;
+    timeout = null;
+  }
+
+  const transform = new Transform({
+    transform(chunk, encoding, callback) {
+      buffered.push(chunk);
+      if (timeout) {
+        callback();
+        return;
+      }
+
+      timeout = setTimeout(() => {
+        flushBufferedChunks(transform);
+        if (!startedRSC) {
+          startedRSC = true;
+          writeRSCStream(rscStream, transform)
+            .then(resolveFlightDataPromise)
+            .catch((err) => transform.destroy(err));
+        }
+      }, 0);
+
+      callback();
+    },
+
+    async flush(callback) {
+      try {
+        await flightDataPromise;
+        if (timeout) {
+          clearTimeout(timeout);
+          flushBufferedChunks(transform);
+        }
+        this.push(encoder.encode(trailer));
+        callback();
+      } catch (err) {
+        callback(err);
+      }
+    },
+  });
+
+  return transform;
+}
+
+async function writeRSCStream(rscStream, transform) {
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+
+  for await (const chunk of rscStream) {
+    try {
+      writeChunk(JSON.stringify(decoder.decode(chunk, { stream: true })), transform);
+    } catch (err) {
+      const base64 = JSON.stringify(Buffer.from(chunk).toString('base64'));
+      writeChunk(`Uint8Array.from(Buffer.from(${base64}, 'base64'))`, transform);
+    }
+  }
+
+  const remaining = decoder.decode();
+  if (remaining.length) {
+    writeChunk(JSON.stringify(remaining), transform);
+  }
+}
+
+function writeChunk(chunk, transform) {
+  transform.push(encoder.encode(`<script>${escapeScript(`(self.__RSC_PAYLOAD||=[]).push(${chunk})`)}</script>`));
+}
+
+function escapeScript(script) {
+  return script.replace(/<!--/g, '<\\!--').replace(/<\/(script)/gi, '</\\$1');
+}
+
+module.exports = { injectRSCPayload };
+```
+
+</TabsContent>
+
+<TabsContent value='rsc-html-stream/client.js'>
+
+{/* prettier-ignore */}
+```js
+// https://github.com/devongovett/rsc-html-stream/blob/main/client.js
+
+let streamController;
+const encoder = new TextEncoder();
+
+export const rscStream = new ReadableStream({
+  start(controller) {
+    const handleChunk = (chunk) => {
+      if (typeof chunk === 'string') {
+        controller.enqueue(encoder.encode(chunk));
+      } else {
+        controller.enqueue(chunk);
+      }
+    };
+    window.__RSC_PAYLOAD ||= [];
+    window.__RSC_PAYLOAD.forEach(handleChunk);
+    window.__RSC_PAYLOAD.push = (chunk) => {
+      handleChunk(chunk);
+    };
+    streamController = controller;
+  },
+});
+
+const closeController = () => {
+  if (streamController) {
+    streamController.close();
+    streamController = null;
+  }
+};
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', closeController);
+} else {
+  closeController();
+}
+```
+
+</TabsContent>
+
+</Tabs>
+
+- The code creates a promise to track if the RSC payload injection is complete. An array called `buffered` stores all the HTML chunks pushed during the current tick of the event loop. This ensures all chunks are flushed before starting RSC payload injection to avoid injecting the payload between partial HTML chunks, which could result in invalid HTML.
+
+- The `flushBufferedChunks` function iterates over each HTML chunk and checks if it ends with the trailer (`</body></html>`). If the trailer is found, it removes this part from the HTML since any content after the trailer is invalid. The trailer is manually appended back after the RSC payload injection is completed.
+
+- Node.js [`Transform`](https://nodejs.org/api/stream.html#class-streamtransform) streams is used to transform the HTML stream. When an HTML chunk is received, it is pushed into the buffer. If an RSC payload injection is already scheduled to run on the next tick of the event loop, the function simply waits for the next HTML chunk. This delay ensures all valid HTML is flushed before starting the payload injection, preventing invalid HTML.
+
+- On the next tick of the event loop, all buffered HTML chunks are flushed to the output stream using `flushBufferedChunks`. The buffer is then emptied, and the timeout is set to `null` to allow scheduling the flushing of buffered HTML chunks during the next tick of the event loop. This approach ensures the RSC payload injection does not produce invalid HTML.
+
+- RSC payload injection starts by iterating through the RSC stream obtained by calling the `injectRSCPayload` function. For each chunk, a `<script>` tag is injected with the JSON-stringified version of the RSC chunk, which is pushed into a global array called `__RSC_PAYLOAD`. After the RSC payload injection is complete, the resolver of the `flightDataPromise` created earlier is called.
+
+- In the `flush` method of the `Transform` implementation, the function waits for the RSC payload injection to complete by awaiting the `flightDataPromise`. If a timeout is scheduled to flush the HTML chunks, it clears the timeout and flushes all the buffered chunks immediately instead of waiting until the next tick of the event loop. Finally, the trailer is appended back to indicate the end of the HTML.
+
+- On the client side, a new Readable Web stream is created. Each chunk in the global `__RSC_PAYLOAD` is enqueued for processing. Once the DOM content is loaded, indicating the entire document has been received, the stream is closed to signal the end of the RSC payload stream.
+
+The processing in this code is complex and may require reading the explanation multiple times to fully understand. It took me several days to grasp this, so it is expected to take some time.
+
+With this understanding of how to inject RSC payload into the HTML stream, these APIs can now be used to hydrate the application.
+
+<Tabs defaultValue='fizz-worker.js'>
+
+<ScrollArea className='w-full'>
+  <TabsList>
+    <TabsTrigger value='fizz-worker.js'>fizz-worker.js</TabsTrigger>
+    <TabsTrigger value='client.js'>client.js</TabsTrigger>
+  </TabsList>
+  <ScrollBar orientation='horizontal' />
+</ScrollArea>
+
+<TabsContent value='fizz-worker.js'>
+
+{/* prettier-ignore */}
+```js lineNumbers addition="5,9,14,17,40,43-45" deletion="42"
+const { parentPort } = require('worker_threads');
+const { Writable, PassThrough } = require('stream');
+const ReactServerDOMWebpackClient = require('react-server-dom-webpack/client');
+const ReactDOMServer = require('react-dom/server');
+const { injectRSCPayload } = require('./rsc-html-stream/server');
+
+parentPort.on('message', async (request) => {
+  const htmlConsumerRSCStream = new PassThrough();
+  const payloadConsumerRSCStream = new PassThrough();
+
+  request.port.on('message', (message) => {
+    if (message.type === 'data') {
+      htmlConsumerRSCStream.write(message.data);
+      payloadConsumerRSCStream.write(message.data);
+    } else if (message.type === 'end') {
+      htmlConsumerRSCStream.end();
+      payloadConsumerRSCStream.end();
+    }
+  });
+
+  const writableStream = new Writable({
+    write(chunk, encoding, callback) {
+      request.port.postMessage({
+        type: 'data',
+        data: chunk,
+      });
+      callback();
+    },
+    final(callback) {
+      request.port.postMessage({ type: 'end' });
+      callback();
+    },
+  });
+
+  const tree = await ReactServerDOMWebpackClient.createFromNodeStream(htmlConsumerRSCStream, {
+    moduleMap: {},
+  });
+
+  const htmlStream = ReactDOMServer.renderToPipeableStream(tree, {
+    bootstrapScripts: ['/client.js'],
+    onShellReady: () => {
+      htmlStream.pipe(writableStream);
+      const htmlStreamTransformer = injectRSCPayload(payloadConsumerRSCStream)
+      const htmlStreamWithRSCPayload = htmlStream.pipe(htmlStreamTransformer)
+      htmlStreamWithRSCPayload.pipe(writableStream);
+    },
+  });
+});
+```
+
+</TabsContent>
+
+<TabsContent value='client.js'>
+
+{/* prettier-ignore */}
+```js lineNumbers addition="1,3,5-11" deletion="4"
+import React from 'react';
+import ReactDOMClient from 'react-dom/client';
+import ReactServerDOMWebpackClient from 'react-server-dom-webpack/client';
+import { App } from './app';
+import { rscStream } from './rsc-html-stream/client';
+
+const reactTreePromise = ReactServerDOMWebpackClient.createFromReadableStream(rscStream);
+
+function App() {
+  return React.use(rscPayloadPromise);
+}
+
+ReactDOMClient.hydrateRoot(document, <App />);
+```
+
+</TabsContent>
+
+</Tabs>
+
+Since we need the RSC stream for injecting the RSC payload we create one more copy of the RSC stream using another `PassThrough`. We get the transform by calling the `injectRSCPayload` function and passing this RSC stream copy as the argument.
+
+The HTML stream is piped to this transformer to get back the Transformed HTML stream which has injected RSC payload. Then this transformed html stream is piped to the writeable
+
+On client, the rscStream is imported and passed to `createFromReadableStream` API of `react-server-dom-webpack/client`. In the `App` component, the react tree promise is unwrapped using the `use` API.
+
+Now that we have the React tree we can hydrate the Server generated HTML using `hydrateRoot` API.
+
+You won't observe any difference from the previous version since we don't have any interactive components yet. It'll all make sense in sometime.
+
+Everything needed for interactivity is in place so let's bring back the `Search` component.
