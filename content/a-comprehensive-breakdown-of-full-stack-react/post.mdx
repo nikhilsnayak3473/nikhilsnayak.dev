@@ -1334,3 +1334,9 @@ Now that we have the React tree we can hydrate the Server generated HTML using `
 You won't observe any difference from the previous version since we don't have any interactive components yet. It'll all make sense in sometime.
 
 Everything needed for interactivity is in place so let's bring back the `Search` component.
+
+Let’s take a closer look at what happens during the hydration process. The `createFromReadableStream` function takes in the RSC stream (i.e., the RSC payload) and provides the React tree. Earlier, while discussing the [RSC Payload](#rsc-payload), I mentioned that the idea of RSCs running only on the server and never on the client is **partially true**. This is because we need the entire **React tree** to create the **Fiber tree** for reconciliation.
+
+Here’s what actually happens: RSCs are not hydrated. This is because RSCs are stateless by design. If we examine the RSC payload of a component, it includes metadata such as the environment, owner, props, and the returned JSX of that component. However, there is no information stored about how the JSX is generated. This makes the RSC payload inherently stateless. Since these components are stateless, React can safely skip the hydration process for them. This is called **Partial Hydration**.
+
+With this optimization, the application gets hydrated more quickly and can prioritize hydrating individual components based on user interaction, leading to a better user experience.
