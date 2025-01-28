@@ -214,7 +214,7 @@ export function App() {
         <script src='https://cdn.tailwindcss.com'></script>
       </head>
       <body>
-        <div className='font-geist flex min-h-[100dvh] flex-col bg-gray-900 text-gray-200'>
+        <div className='flex min-h-[100dvh] flex-col bg-gray-900 text-gray-200'>
           <main className='container mx-auto max-w-lg flex-grow px-4 py-8'>
             <Search onSearch={setQuery} />
             <MoviesList voteFn={voteFn} movies={filteredMovies} />
@@ -496,7 +496,7 @@ export async function App() {
         <script src='https://cdn.tailwindcss.com'></script>
       </head>
       <body>
-        <div className='font-geist flex min-h-[100dvh] flex-col bg-gray-900 text-gray-200'>
+        <div className='flex min-h-[100dvh] flex-col bg-gray-900 text-gray-200'>
           <main className='container mx-auto max-w-lg flex-grow px-4 py-8'>
             <Search onSearch={setQuery} />
             <MoviesList voteFn={voteFn} movies={filteredMovies} />
@@ -874,9 +874,149 @@ Now, run the server. We should see the UI, right?
 
 Yes! This time, no tricks—you'll be able to see the Movie list UI. 🎉
 
+Before we move further, there is one small change that can be made to the application code which improves the user experience significantly.
+
+```js filename="app.js" lineNumbers highlight="5"
+import { getMovies } from './db';
+import { MoviesList } from './movie-list';
+
+export async function App() {
+  const movies = await getMovies();
+
+  return (
+    <html lang='en'>
+      <head>
+        <meta charSet='UTF-8' />
+        <meta name='viewport' content='width=device-width, initial-scale=1.0' />
+        <title>Cine Score</title>
+        <script src='https://cdn.tailwindcss.com'></script>
+      </head>
+      <body>
+        <div className='flex min-h-[100dvh] flex-col bg-gray-900 text-gray-200'>
+          <main className='container mx-auto max-w-lg flex-grow px-4 py-8'>
+            <MoviesList movies={movies} />
+          </main>
+        </div>
+      </body>
+    </html>
+  );
+}
+```
+
+The promise returned by `getMovies` is awaited, which means the app cannot start rendering anything until the promise resolves. Although only the `MovieList` component depends on the data, the entire app is blocked from rendering. By making a small adjustment, the shell can be rendered immediately while only blocking the rendering of `MovieList`.
+
+Things get even more interesting if we can provide a fallback while waiting for `MovieList` to render and swap the fallback with the actual content once it becomes available. Yes, we can achieve this thanks to a powerful primitive of React, `Suspense`.
+
+#### Out of order Streaming
+
+<Tabs defaultValue='app.js'>
+
+<ScrollArea className='w-full'>
+  <TabsList>
+    <TabsTrigger value='app.js'>app.js</TabsTrigger>
+    <TabsTrigger value='movie-list.js'>movie-list.js</TabsTrigger>
+  </TabsList>
+  <ScrollBar orientation='horizontal' />
+</ScrollArea>
+
+<TabsContent value='app.js'>
+
+```js lineNumbers addition="1,8,9,23-29" deletion="6,7,22"
+import { Suspense } from 'react';
+
+import { getMovies } from './db';
+import { MoviesList } from './movie-list';
+
+export async function App() {
+  const movies = await getMovies();
+export function App() {
+  const moviesPromise = getMovies();
+
+  return (
+    <html lang='en'>
+      <head>
+        <meta charSet='UTF-8' />
+        <meta name='viewport' content='width=device-width, initial-scale=1.0' />
+        <title>Cine Score</title>
+        <script src='https://cdn.tailwindcss.com'></script>
+      </head>
+      <body>
+        <div className='flex min-h-[100dvh] flex-col bg-gray-900 text-gray-200'>
+          <main className='container mx-auto max-w-lg flex-grow px-4 py-8'>
+            <MoviesList movies={movies} />
+            <Suspense
+              fallback={
+                <div className='mx-auto size-8 animate-spin rounded-full border-2 border-gray-300 border-t-gray-500' />
+              }
+            >
+              <MoviesList moviesPromise={moviesPromise} />
+            </Suspense>
+          </main>
+        </div>
+      </body>
+    </html>
+  );
+}
+```
+
+</TabsContent>
+
+<TabsContent value='movie-list.js'>
+
+```js lineNumbers addition="4,5" deletion="3"
+import { Vote } from './vote';
+
+export function MoviesList({ movies, voteFn }) {
+export async function MoviesList({ moviesPromise, voteFn }) {
+  const movies = await moviesPromise;
+  return (
+    <ul
+      className='max-h-[70vh] space-y-4 overflow-auto px-4'
+      style={{
+        scrollbarWidth: 'thin',
+        scrollbarColor: '#4b5563 #1a1a1a',
+      }}
+    >
+      {movies.length > 0 ? (
+        movies.map((movie) => (
+          <li
+            key={movie.id}
+            className='flex items-center justify-between rounded-lg bg-gray-800 p-4 shadow'
+          >
+            <div className='flex items-center space-x-4'>
+              <Vote id={movie.id} action={voteFn} />
+              <span className='text-xl font-bold'>{movie.votes}</span>
+              <span className='text-gray-300'>{movie.title}</span>
+            </div>
+          </li>
+        ))
+      ) : (
+        <li className='p-4 text-center text-gray-500'>No movies</li>
+      )}
+    </ul>
+  );
+}
+```
+
+</TabsContent>
+
+</Tabs>
+
+In the `App` component, the promise returned by `getMovies` is no longer awaited. Instead, it is passed down to the `MovieList` component. The `MovieList` component is now an async component that waits for the passed promise to resolve. It is wrapped in a `Suspense` boundary with a loading spinner as the fallback.
+
+The shell of the app i.e. `head` tag, links to css along with the fallback of the suspended `MovieList` component, is immediately sent to the browser. While the server waits for `MovieList` component to render, the browser can start downloading the assets which are included in the app shell.
+
+Now the real question is how do we swap out the fallback with actual HTML? The HTML stream is sequential meaning, once the server sends a chunk of HTML it can no longer be modified. The chunks can only be streamed in the order that they are generated.
+
+The fallback is swapped out with the actual HTML using a trick implemented by the `Suspense` boundary. Suspended content is sent inside a hidden container, and a small JavaScript snippet is injected into the HTML as a `script` tag. This JavaScript swaps the fallback with the actual content. This is called **Out of order streaming**.
+
+The suspended components can resolve in any order and react takes care of swapping the fallbacks with correct content. The only catch here is you need to have javascript enabled. If for some reason you have disabled the js execution, the fallbacks will not be swapped out.
+
+One weird pattern I have implemented in the above code is instead of calling the `getMovies` function directly inside `MovieList` component, the promise is created in the `App` component and passed down as a prop. It is implemented this way because, promises are _hot_ in nature meaning the data fetching starts immediately upon the promise's creation, not when it is awaited. This way we initiate data fetching as early as possible and the `Suspense` boundary only waits for the data rather than initiating it. This pattern is called **Render as You Fetch** which is the recommend way to use `Suspense` for data fetching.
+
 Now that we have set up the base for RSC, let's bring back the parts we left out when converting pure SSR into RSC, specifically the `Search` component and the vote functionality.
 
-We've been ignoring an important aspect of the application. While async components for data fetching and SSR are great, where is React's main selling point client-side interactivity?
+We've been ignoring an important aspect of the application. While async components for data fetching, `Suspense` boundaries for Out of order streaming and SSR are all great, where is React's main selling point client-side interactivity?
 
 To enable this, we need to hydrate the server-generated HTML and activate React on the client side. Let's explore how we can achieve this.
 
