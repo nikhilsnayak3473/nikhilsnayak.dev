@@ -1331,12 +1331,293 @@ On client, the rscStream is imported and passed to `createFromReadableStream` AP
 
 Now that we have the React tree we can hydrate the Server generated HTML using `hydrateRoot` API.
 
+Let's take a closer look at what happens during the hydration process. The `createFromReadableStream` function takes in the RSC stream (i.e., the RSC payload) and provides the React tree. Earlier, while discussing the [RSC Payload](#rsc-payload), I mentioned that the idea of RSCs running only on the server and never on the client is **partially true**. This is because we need the entire **React tree** to create the **Fiber tree** for reconciliation.
+
+Here's what actually happens: RSCs are not hydrated. This is because RSCs are stateless by design. If we examine the RSC payload of a component, it includes metadata such as the environment, owner, props, and the returned JSX of that component. However, there is no information stored about how the JSX is generated. This makes the RSC payload inherently stateless. Since these components are stateless, React can safely skip the hydration process for them. This is called **Partial Hydration**.
+
+With this optimization, the application gets hydrated more quickly and can prioritize hydrating individual components based on user interaction, leading to a better user experience.
+
 You won't observe any difference from the previous version since we don't have any interactive components yet. It'll all make sense in sometime.
 
 Everything needed for interactivity is in place so let's bring back the `Search` component.
 
-Let’s take a closer look at what happens during the hydration process. The `createFromReadableStream` function takes in the RSC stream (i.e., the RSC payload) and provides the React tree. Earlier, while discussing the [RSC Payload](#rsc-payload), I mentioned that the idea of RSCs running only on the server and never on the client is **partially true**. This is because we need the entire **React tree** to create the **Fiber tree** for reconciliation.
+### Search Component
 
-Here’s what actually happens: RSCs are not hydrated. This is because RSCs are stateless by design. If we examine the RSC payload of a component, it includes metadata such as the environment, owner, props, and the returned JSX of that component. However, there is no information stored about how the JSX is generated. This makes the RSC payload inherently stateless. Since these components are stateless, React can safely skip the hydration process for them. This is called **Partial Hydration**.
+In a traditional SSR React app, we used state to store the list of movies and filtered the list based on the search query to achieve search functionality. However, with RSCs, we know that they are stateless and not hydrated. So, how do we update the list based on the search query?
 
-With this optimization, the application gets hydrated more quickly and can prioritize hydrating individual components based on user interaction, leading to a better user experience.
+This requires shifting our thinking from a **client-first approach** to a **server-first approach**. To understand this better, let's briefly revisit React's **reconciliation process**.
+
+Reconciliation is the process by which React updates the UI when the application's state change.
+
+1. When a state update occurs, React generates a new React tree that represents the UI after the update.
+2. React then compares this new tree with the existing **Fiber tree**.
+3. React determines the diff between the new tree and the Fiber tree and updates the parts that have changed.
+4. Once reconciliation is complete, these changes are applied to the actual DOM.
+
+To make the search functionality work, we need to update the **React tree** with only the movies that match the search query. If we can obtain an updated React tree that contains only the filtered movies, the search functionality is effectively handled.
+
+If we reverse-engineer the process, we see that:
+
+- The source of the React element tree is the **RSC payload**.
+- The source of the RSC payload is the **server**.
+
+Since RSCs are **stateless**, we cannot rely on traditional client-side state management to update the UI. Instead, we need to **refetch the RSC payload** from the server based on the search query. When the new RSC payload arrives, we can use it to recreate the React tree and trigger the reconciliation process.
+
+Let's update the code to implement this solution.
+
+<Tabs defaultValue='client.js'>
+
+<ScrollArea className='w-full'>
+  <TabsList>
+    <TabsTrigger value='client.js'>client.js</TabsTrigger>
+    <TabsTrigger value='search.js'>search.js</TabsTrigger>
+    <TabsTrigger value='server.js'>server.js</TabsTrigger>
+    <TabsTrigger value='app.js'>app.js</TabsTrigger>
+  </TabsList>
+  <ScrollBar orientation='horizontal' />
+</ScrollArea>
+
+<TabsContent value='client.js'>
+
+{/* prettier-ignore */}
+```js lineNumbers addition="10-24" deletion="9"
+import React from 'react';
+import ReactDOMClient from 'react-dom/client';
+import ReactServerDOMWebpackClient from 'react-server-dom-webpack/client';
+import { rscStream } from './rsc-html-stream/client';
+
+const reactTreePromise = ReactServerDOMWebpackClient.createFromReadableStream(rscStream);
+
+function App() {
+  return React.use(rscPayloadPromise);
+  const [tree, setTree] = React.useState(React.use(rscPayloadPromise));
+
+  React.useEffect(() => {
+    window.__updateTree = (tree) => {
+      React.startTransition(() => {
+        setTree(tree);
+      })
+    };
+
+    return () => {
+      window.__setTree = null;
+    };
+  }, []);
+
+  return tree;
+}
+
+ReactDOMClient.hydrateRoot(document, <App />);
+```
+
+</TabsContent>
+
+<TabsContent value='search.js'>
+
+```js lineNumbers addition="2,5,13-21" deletion="4,10-12"
+import { useTransition } from 'react';
+import ReactServerDOMWebpackClient from 'react-server-dom-webpack/client';
+
+export function Search({ onSearch }) {
+export function Search() {
+  const [isSearching, startSearching] = useTransition();
+
+  const handleChange = (e) => {
+    const query = e.target.value;
+    startSearching(() => {
+      onSearch(query);
+    });
+    startSearching(async () => {
+      const headers = new Headers();
+      headers.set('Accept', 'text/x-component');
+
+      const response = fetch(`/?query=${query}`, { headers });
+      const tree = await ReactServerDOMWebpackClient.createFromFetch(response);
+
+      window.__updateTree?.(tree);
+    });
+  };
+
+  return (
+    <search className='relative mb-6 px-4'>
+      <form>
+        <input
+          type='search'
+          placeholder='Search movies...'
+          className='w-full rounded-md border border-gray-700 bg-gray-800 px-8 py-2 text-gray-300 placeholder-gray-500 focus:ring-2 focus:ring-indigo-500 focus:outline-none'
+          onChange={handleChange}
+        />
+      </form>
+      {isSearching && (
+        <div className='absolute top-1/2 right-6 -translate-y-1/2'>
+          <div className='size-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-500' />
+        </div>
+      )}
+    </search>
+  );
+}
+```
+
+</TabsContent>
+
+<TabsContent value='server.js'>
+
+{/* prettier-ignore */}
+```js lineNumbers addition="27,30-34" deletion="26"
+require('@babel/register')({
+  ignore: [/[\\\/](dist|node_modules)[\\\/]/],
+  presets: [['@babel/preset-react', { runtime: 'automatic' }]],
+  plugins: ['@babel/plugin-transform-modules-commonjs'],
+});
+
+const express = require('express');
+const path = require('path');
+const React = require('react');
+const ReactServerDOMWebpackServer = require('react-server-dom-webpack/server');
+const { Worker, MessageChannel } = require('worker_threads');
+const { PassThrough } = require('stream');
+const { App } = require('./app');
+
+const app = express();
+const PORT = 1234;
+
+const fizzWorker = new Worker(path.resolve(__dirname, './fizz-worker.js'), {
+  execArgv: ['--conditions', 'default'],
+});
+
+app.use(express.static(path.join(__dirname, 'dist')));
+
+async function handleRequest(req, res) {
+  try {
+    const tree = React.createElement(App);
+    const tree = React.createElement(App, { searchParams: req.query });
+    const rscStream = ReactServerDOMWebpackServer.renderToPipeableStream(tree);
+
+    if (req.headers.accept === 'text/x-component') {
+      res.setHeader('Content-Type', 'text/x-component');
+      rscStream.pipe(res);
+      return;
+    }
+
+    res.setHeader('Content-Type', 'text/html');
+
+    const { port1, port2 } = new MessageChannel();
+
+    const request = {
+      port: port2,
+    };
+
+    fizzWorker.postMessage(request, [port2]);
+
+    const passThroughRSCStream = new PassThrough();
+    rscStream.pipe(passThroughRSCStream);
+
+    passThroughRSCStream.on('data', (data) => {
+      port1.postMessage({
+        type: 'data',
+        data,
+      });
+    });
+
+    passThroughRSCStream.on('end', () => {
+      port1.postMessage({
+        type: 'end',
+      });
+    });
+
+    port1.on('message', (message) => {
+      if (message.type === 'data') {
+        res.write(message.data);
+      } else if (message.type === 'end') {
+        res.end();
+      }
+    });
+  } catch (error) {
+    console.log({ error });
+    res.status(500).send('Internal Server Error');
+  }
+}
+
+app.get('/', handleRequest);
+
+app.listen(PORT, () => {
+  console.log(`Server is running on http://localhost:${PORT}`);
+});
+```
+
+</TabsContent>
+
+<TabsContent value='app.js'>
+
+```js lineNumbers addition="5,9,10,23" deletion="7,8"
+import { Suspense } from 'react';
+
+import { getMovies } from './db';
+import { MoviesList } from './movie-list';
+import { Search } from './search';
+
+export function App() {
+  const moviesPromise = getMovies();
+export function App({ searchParams }) {
+  const moviesPromise = getMovies(searchParams.query);
+
+  return (
+    <html lang='en'>
+      <head>
+        <meta charSet='UTF-8' />
+        <meta name='viewport' content='width=device-width, initial-scale=1.0' />
+        <title>Cine Score</title>
+        <script src='https://cdn.tailwindcss.com'></script>
+      </head>
+      <body>
+        <div className='flex min-h-[100dvh] flex-col bg-gray-900 text-gray-200'>
+          <main className='container mx-auto max-w-lg flex-grow px-4 py-8'>
+            <Search />
+            <Suspense
+              fallback={
+                <div className='mx-auto size-8 animate-spin rounded-full border-2 border-gray-300 border-t-gray-500' />
+              }
+            >
+              <MoviesList moviesPromise={moviesPromise} />
+            </Suspense>
+          </main>
+        </div>
+      </body>
+    </html>
+  );
+}
+```
+
+</TabsContent>
+
+</Tabs>
+
+In the client entry point, the `App` component is modified to hold the React tree in state so that we can trigger reconciliation when we update this state with a new React tree. In the effect, the `__updateTree` function is exposed on the global `window` object to make it easy to access in the application code. There is a better way to handle this instead of exposing the updater function on the `window` object, which we will cover later.
+
+> The state update is done inside a transition. This is essential for reconciliation to work properly. I don't have an exact answer for why this must be done in a transition. If you have an answer, please feel free to update this blog or add a comment. It'll help me and other readers as well.
+
+In the `Search` component, whenever the query is updated, we make a fetch request with the query as the search parameter. We also set the `Accept` header to `text/x-component` to indicate to the server that we expect only the RSC payload, not HTML.
+
+> Note: `text/x-component` is the content type of RSC payload used by all the RSC frameworks
+
+The response is passed to the `createFromFetch` API of `react-server-dom-webpack/client` to retrieve the React tree. The `__updateTree` function, which is exposed on the global `window` object, is then called with the new React tree. This triggers a state update, and the UI updates as a result of reconciliation.
+
+On the server, the search parameters are passed as props to the `App` component. if the `Accept` header is `text/x-component` we pipe the rsc stream directly to the response instead of forwarding to SSR worker. The `App` component is updated to render the `Search` component, and the query received as a prop is forwarded to the `getMovies` function. The `getMovies` function is already configured to apply filtering based on the query.
+
+> Please use search parameters for state as much as possible. It simplifies many complexities—ensuring a single source of truth across the client and server, keeping the app state in sync with the URL, and making the app state shareable and ability to bookmark.
+
+Now, if we start the server and visit the browser—oh, wait, the server itself won't start. Once again, we've hit another error:
+
+> Error: (0 , \_react.useTransition) is not a function or its return value is not iterable.
+
+This issue is related to the `useTransition` hook used in the `Search` component. To debug this error, let's go back to the definition of React Server Components.
+
+RSCs is a serialization/deserialization capability that supports a superset of the types defined by the structured clone algorithm. The return value of `useTransition` is an array with two values. The first value is a `boolean` that indicates if a transition is pending, and the second value is a function used to trigger the transition. The key takeaway here is that this function is not serializable—and if you recall, I never mentioned that functions are serializable when defining RSCs.
+
+Similarly, if you look at the `handleChange` event handler defined inside the component body, you'll notice that it's also a function. Since functions cannot be serialized, how do we solve this problem?
+
+We should simply avoid serializing these kinds of components—those that use client-side APIs like state, effects, transitions, event handlers, or anything that is not serializable by the Flight renderer. We do this by ensuring these components are not rendered in the `react-server` environment but instead in a non-`react-server` environment.
+
+So, what is this non-`react-server` environment? If you look carefully, we have been using two non-`react-server` environments all along: the SSR worker and the browser.
+
+Let's explore how to implement this approach next.
