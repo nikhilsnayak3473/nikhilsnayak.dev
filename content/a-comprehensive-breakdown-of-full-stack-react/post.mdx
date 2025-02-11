@@ -1386,11 +1386,11 @@ import ReactDOMClient from 'react-dom/client';
 import ReactServerDOMWebpackClient from 'react-server-dom-webpack/client';
 import { rscStream } from './rsc-html-stream/client';
 
-const reactTreePromise = ReactServerDOMWebpackClient.createFromReadableStream(rscStream);
+const initialReactTreePromise = ReactServerDOMWebpackClient.createFromReadableStream(rscStream);
 
 function App() {
   return React.use(rscPayloadPromise);
-  const [tree, setTree] = React.useState(React.use(rscPayloadPromise));
+  const [tree, setTree] = React.useState(React.use(initialReactTreePromise));
 
   React.useEffect(() => {
     window.__updateTree = (tree) => {
@@ -1419,7 +1419,7 @@ import { useTransition } from 'react';
 import ReactServerDOMWebpackClient from 'react-server-dom-webpack/client';
 
 export function Search({ onSearch }) {
-export function Search() {
+export function Search({ query }) {
   const [isSearching, startSearching] = useTransition();
 
   const handleChange = (e) => {
@@ -1446,6 +1446,7 @@ export function Search() {
           placeholder='Search movies...'
           className='w-full rounded-md border border-gray-700 bg-gray-800 px-8 py-2 text-gray-300 placeholder-gray-500 focus:ring-2 focus:ring-indigo-500 focus:outline-none'
           onChange={handleChange}
+          defaultValue={query}
         />
       </form>
       {isSearching && (
@@ -1572,7 +1573,7 @@ export function App({ searchParams }) {
       <body>
         <div className='flex min-h-[100dvh] flex-col bg-gray-900 text-gray-200'>
           <main className='container mx-auto max-w-lg flex-grow px-4 py-8'>
-            <Search />
+            <Search query={searchParams.query} />
             <Suspense
               fallback={
                 <div className='mx-auto size-8 animate-spin rounded-full border-2 border-gray-300 border-t-gray-500' />
@@ -1606,7 +1607,7 @@ On the server, the search parameters are passed as props to the `App` component.
 
 > Please use search parameters for state as much as possible. It simplifies many complexities—ensuring a single source of truth across the client and server, keeping the app state in sync with the URL, and making the app state shareable and ability to bookmark.
 
-Now, if we start the server and visit the browser—oh, wait, the server itself won't start. Once again, we've hit another error:
+Now, if we start the server and visit the browser—oh, wait, the server crashes. Once again, we've hit another error:
 
 > Error: (0 , \_react.useTransition) is not a function or its return value is not iterable.
 
@@ -1616,8 +1617,355 @@ RSCs is a serialization/deserialization capability that supports a superset of t
 
 Similarly, if you look at the `handleChange` event handler defined inside the component body, you'll notice that it's also a function. Since functions cannot be serialized, how do we solve this problem?
 
-We should simply avoid serializing these kinds of components—those that use client-side APIs like state, effects, transitions, event handlers, or anything that is not serializable by the Flight renderer. We do this by ensuring these components are not rendered in the `react-server` environment but instead in a non-`react-server` environment.
+We should simply avoid serializing these kinds of components—those that use client-side APIs like state, effects, transitions, event handlers, or anything that is not serializable by the Flight renderer. We do this by ensuring these components are not rendered in the `react-server` environment but instead in a non-`react-server` environment. In RSC world, these kind of components are called **Client Components**.
 
 So, what is this non-`react-server` environment? If you look carefully, we have been using two non-`react-server` environments all along: the SSR worker and the browser.
 
 Let's explore how to implement this approach next.
+
+### References
+
+To avoid serializing **Client components**, we should not import them into the `react-server` environment. Instead, we should replace them with placeholders that provide sufficient information to import **Client components** in the SSR environment and in the browser. To achieve this, React introduces a new primitive called **Reference**.
+
+There are two types of references that the Flight renderer understands: **Client Reference** and **Server Reference**. Since we need to store metadata for something imported in a non-`react-server` environment, we should use **Client Reference**. We will discuss **Server Reference** later.
+
+To prevent client components from being imported into the `react-server` environment and instead replace them with the relevant reference, we rely on bundlers. Each bundler has its own heuristics for bundling, code splitting, etc. Hence, some parts of the RSC implementation are always bundler-specific. For this reason, we have multiple `react-server-dom-<bundler-name>` implementations.
+
+#### Client Reference
+
+A **Client Reference** is an object with the following structure:
+
+{/* prettier-ignore */}
+```js
+const clientReference = {
+  '$$typeof': Symbol.for('react.client.reference'),
+  '$$id': 'a-identifier-for-the-client-component'
+};
+```
+
+The `"$$typeof"` property is well known in the React ecosystem. It is essentially a `symbol` used to differentiate various React primitives such as React elements, Context, Suspense, etc. The `"$$id"` property is particularly interesting—it is used to retrieve essential metadata from the manifest file for importing the client component in a non-`react-server` environment.
+
+Since we are importing **Client components** directly in the browser/SSR environment, these components need to be bundled separately. However, the problem is that the bundler isn't smart enough to automatically determine the starting point for bundling into the client environment within the module graph. This is where **directives** come into play.
+
+A directive in JavaScript is a string that appears at the start of a module or function body. A built-in example is `"use strict"`, which enables strict mode and minimizes some of JavaScript's quirks. React introduces two new directives: `"use client"` and `"use server"`, corresponding to **Client Reference** and **Server Reference**, respectively. These directives are not part of the JavaScript language itself but are specific to RSC bundlers.
+
+By marking a module with the `"use client"` directive, we indicate the starting point for client bundling in the module graph. When the bundler encounters this directive, it bundles the module and all its dependencies into a separate client bundle that can be directly imported in the browser. We also need to track metadata like the `chunks` emitted for that module in a manifest file, which will be used by the Flight renderer when rendering a client reference. The actual structure of the manifest looks something like this:
+
+```json
+{
+  "a-identifier-for-the-client-component": {
+    "id": "module-path",
+    "chunks": ["chunk1", "chunk2"],
+    "name": "*"
+  }
+}
+```
+
+Since Webpack does not provide first-class support for analyzing these directives, the required behavior is achieved through a Webpack plugin. Writing a Webpack plugin from scratch introduces additional complexities, but fortunately, we don't have to. `react-server-dom-webpack` provides a basic Webpack plugin that handles this for simple use cases.
+
+With bundling sorted, we still need to replace client component imports with **Client References**. This part is tricky because we are not bundling for the server environment but instead transpiling JSX on the fly using Babel register. Therefore, we need something similar to Babel register that can replace client component imports with **Client References** at runtime. Thankfully, `react-server-dom-webpack` already provides a solution for this.
+
+I know this is a lot of theory and might be hard to grasp right away, but it will all make sense once we see it in code.
+
+<Tabs defaultValue='build.js'>
+
+<ScrollArea className='w-full'>
+  <TabsList>
+    <TabsTrigger value='build.js'>build.js</TabsTrigger>
+    <TabsTrigger value='search.js'>search.js</TabsTrigger>
+    <TabsTrigger value='server.js'>server.js</TabsTrigger>
+    <TabsTrigger value='fizz-worker.js'>fizz-worker.js</TabsTrigger>
+    <TabsTrigger value='jsx-loader.js'>jsx-loader.js</TabsTrigger>
+  </TabsList>
+  <ScrollBar orientation='horizontal' />
+</ScrollArea>
+
+<TabsContent value='build.js'>
+
+{/* prettier-ignore */}
+```js lineNumbers addition="3,33"
+const path = require('path');
+const webpack = require('webpack');
+const ReactServerWebpackPlugin = require('react-server-dom-webpack/plugin');
+
+const builder = webpack({
+  mode: process.env.NODE_ENV ?? 'development',
+  entry: path.resolve(__dirname, './client.js'),
+  output: {
+    path: path.resolve(__dirname, './dist'),
+    filename: 'client.js',
+  },
+  module: {
+    rules: [
+      {
+        test: /\.js$/,
+        exclude: /node_modules/,
+        use: {
+          loader: 'babel-loader',
+          options: {
+            presets: [
+              [
+                '@babel/preset-react',
+                {
+                  runtime: 'automatic',
+                },
+              ],
+            ],
+          },
+        },
+      },
+    ],
+  },
+  plugins: [new ReactServerWebpackPlugin({ isServer: false })],
+});
+
+builder.run((err) => {
+  if (err) console.error('Webpack Build Failed', err);
+});
+```
+
+</TabsContent>
+
+<TabsContent value='search.js'>
+
+```js lineNumbers addition="1"
+'use client';
+
+import { useTransition } from 'react';
+import ReactServerDOMWebpackClient from 'react-server-dom-webpack/client';
+
+export function Search({ query }) {
+  const [isSearching, startSearching] = useTransition();
+
+  const handleChange = (e) => {
+    const query = e.target.value;
+    startSearching(async () => {
+      const headers = new Headers();
+      headers.set('Accept', 'text/x-component');
+
+      const response = fetch(`/?query=${query}`, { headers });
+      const tree = await ReactServerDOMWebpackClient.createFromFetch(response);
+
+      window.__updateTree?.(tree);
+    });
+  };
+
+  return (
+    <search className='relative mb-6 px-4'>
+      <form>
+        <input
+          type='search'
+          placeholder='Search movies...'
+          className='w-full rounded-md border border-gray-700 bg-gray-800 px-8 py-2 text-gray-300 placeholder-gray-500 focus:ring-2 focus:ring-indigo-500 focus:outline-none'
+          onChange={handleChange}
+          defaultValue={query}
+        />
+      </form>
+      {isSearching && (
+        <div className='absolute top-1/2 right-6 -translate-y-1/2'>
+          <div className='size-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-500' />
+        </div>
+      )}
+    </search>
+  );
+}
+```
+
+</TabsContent>
+
+<TabsContent value='server.js'>
+
+{/* prettier-ignore */}
+```js lineNumbers addition="1,15,30" deletion="29"
+require('react-server-dom-webpack/node-register')();
+require('@babel/register')({
+  ignore: [/[\\\/](dist|node_modules)[\\\/]/],
+  presets: [['@babel/preset-react', { runtime: 'automatic' }]],
+  plugins: ['@babel/plugin-transform-modules-commonjs'],
+});
+
+const express = require('express');
+const path = require('path');
+const React = require('react');
+const ReactServerDOMWebpackServer = require('react-server-dom-webpack/server');
+const { Worker, MessageChannel } = require('worker_threads');
+const { PassThrough } = require('stream');
+const { App } = require('./app');
+const clientManifest = require('./dist/react-client-manifest.json')
+
+const app = express();
+const PORT = 1234;
+
+const fizzWorker = new Worker(path.resolve(__dirname, './fizz-worker.js'), {
+  execArgv: ['--conditions', 'default'],
+});
+
+app.use(express.static(path.join(__dirname, 'dist')));
+
+async function handleRequest(req, res) {
+  try {
+    const tree = React.createElement(App, { searchParams: req.query });
+    const rscStream = ReactServerDOMWebpackServer.renderToPipeableStream(tree);
+    const rscStream = ReactServerDOMWebpackServer.renderToPipeableStream(tree, clientManifest);
+
+    if (req.headers.accept === 'text/x-component') {
+      res.setHeader('Content-Type', 'text/x-component');
+      rscStream.pipe(res);
+      return;
+    }
+
+    res.setHeader('Content-Type', 'text/html');
+
+    const { port1, port2 } = new MessageChannel();
+
+    const request = {
+      port: port2,
+    };
+
+    fizzWorker.postMessage(request, [port2]);
+
+    const passThroughRSCStream = new PassThrough();
+    rscStream.pipe(passThroughRSCStream);
+
+    passThroughRSCStream.on('data', (data) => {
+      port1.postMessage({
+        type: 'data',
+        data,
+      });
+    });
+
+    passThroughRSCStream.on('end', () => {
+      port1.postMessage({
+        type: 'end',
+      });
+    });
+
+    port1.on('message', (message) => {
+      if (message.type === 'data') {
+        res.write(message.data);
+      } else if (message.type === 'end') {
+        res.end();
+      }
+    });
+  } catch (error) {
+    console.log({ error });
+    res.status(500).send('Internal Server Error');
+  }
+}
+
+app.get('/', handleRequest);
+
+app.listen(PORT, () => {
+  console.log(`Server is running on http://localhost:${PORT}`);
+});
+```
+
+</TabsContent>
+
+<TabsContent value='fizz-worker.js'>
+
+{/* prettier-ignore */}
+```js lineNumbers addition="6-10,43" deletion="40-42"
+const { parentPort } = require('worker_threads');
+const { Writable, PassThrough } = require('stream');
+const ReactServerDOMWebpackClient = require('react-server-dom-webpack/client');
+const ReactDOMServer = require('react-dom/server');
+const { injectRSCPayload } = require('./rsc-html-stream/server');
+const serverConsumerManifest = require('./dist/react-ssr-manifest.json');
+const { pathToFileURL } = require('url');
+const { register } = require('module');
+
+register('./jsx-loader.js', pathToFileURL('./'));
+
+parentPort.on('message', async (request) => {
+  const htmlConsumerRSCStream = new PassThrough();
+  const payloadConsumerRSCStream = new PassThrough();
+
+  request.port.on('message', (message) => {
+    if (message.type === 'data') {
+      htmlConsumerRSCStream.write(message.data);
+      payloadConsumerRSCStream.write(message.data);
+    } else if (message.type === 'end') {
+      htmlConsumerRSCStream.end();
+      payloadConsumerRSCStream.end();
+    }
+  });
+
+  const writableStream = new Writable({
+    write(chunk, encoding, callback) {
+      request.port.postMessage({
+        type: 'data',
+        data: chunk,
+      });
+      callback();
+    },
+    final(callback) {
+      request.port.postMessage({ type: 'end' });
+      callback();
+    },
+  });
+
+  const tree = await ReactServerDOMWebpackClient.createFromNodeStream(htmlConsumerRSCStream, {
+    moduleMap: {},
+  });
+  const tree = await ReactServerDOMWebpackClient.createFromNodeStream(htmlConsumerRSCStream, serverConsumerManifest);
+
+  const htmlStream = ReactDOMServer.renderToPipeableStream(tree, {
+    bootstrapScripts: ['/client.js'],
+    onShellReady: () => {
+      const htmlStreamTransformer = injectRSCPayload(payloadConsumerRSCStream)
+      const htmlStreamWithRSCPayload = htmlStream.pipe(htmlStreamTransformer)
+      htmlStreamWithRSCPayload.pipe(writableStream);
+    },
+  });
+});
+```
+
+</TabsContent>
+
+<TabsContent value='jsx-loader.js'>
+
+```js lineNumbers
+import babel from '@babel/core';
+
+export async function load(url, context, defaultLoad) {
+  const result = await defaultLoad(url, context, defaultLoad);
+  if (result.format === 'module') {
+    const newResult = await babel.transformAsync(result.source, {
+      filename: url,
+      ignore: [/\/(dist|node_modules)\//],
+      presets: [['@babel/preset-react', { runtime: 'automatic' }]],
+    });
+    if (!newResult) {
+      if (typeof result.source === 'string') {
+        return result;
+      }
+      return {
+        source: Buffer.from(result.source).toString('utf8'),
+        format: 'module',
+      };
+    }
+    return { source: newResult.code, format: 'module' };
+  }
+  return defaultLoad(url, context, defaultLoad);
+}
+```
+
+</TabsContent>
+
+</Tabs>
+
+The build script is modified to include the webpack plugin provided by `react-server-dom-webpack/plugin`. This plugin scans the entire project for the `"use client"` directive and bundles the detected module along with all its dependencies for the browser. It also generates two manifest files:
+
+- **react-client-manifest.json**: Provides metadata for the RSC renderer when serializing client references.
+- **react-ssr-manifest.json**: Used in the SSR environment to import client components.
+
+**react-ssr-manifest.json** is required because the React tree is created on the server, while the bundled output is meant for the browser. By using the SSR manifest, client components are directly imported in the SSR environment without additional bundling. Having two manifest files can be a bit confusing at first, but once you implement it, everything starts to make sense.
+
+The **search.js** module is marked with the `"use client"` directive, indicating the starting point for client bundling. The **search.js** module and all its imports are bundled for the browser using the webpack plugin.
+
+In **server.js**, we invoke the Node register function provided by `react-server-dom-webpack/node-register`. This ensures that client component modules are replaced with the appropriate **Client Reference**. Remember the `"$$id"` property in the **Client Reference**? It corresponds to a key present in the client manifest. In our case, the `"$$id"` value is chosen as the module's URL, which is also used as the key in the client manifest. We then import the generated **react-client-manifest.json** and pass it as the second argument to the `renderToPipeableStream` API (RSC renderer).
+
+In **fizz-worker.js**, we import the generated **react-ssr-manifest.json** and pass it as the second argument to `createFromNodeStream`. In an SSR environment, client components are directly imported using dynamic imports. Since we are not using the `require` syntax, we cannot apply the same heuristics as in **server.js** to transpile JSX on the fly. To hook into the lifecycle of dynamic imports, we register the **jsx-loader.js** module to transpile JSX. Learn more about [**module.register**](https://nodejs.org/api/module.html#hooks).
+
+Finally, start the web server and try searching for your favorite movie. And there you go interactivity with client components.
